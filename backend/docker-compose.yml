@@ -1,0 +1,110 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: invoicegen-mysql
+    restart: unless-stopped
+
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: invoicegen
+      MYSQL_USER: invoicegen
+      MYSQL_PASSWORD: invoice123
+
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+
+    ports:
+      - "3306:3306"
+
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+    healthcheck:
+      test:
+        ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+    networks:
+      - invoicegen-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: invoicegen-redis
+    restart: unless-stopped
+
+    command: redis-server --appendonly yes
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis_data:/data
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    networks:
+      - invoicegen-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: invoicegen-backend
+
+    restart: unless-stopped
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    env_file:
+      - .env
+
+    environment:
+      NODE_ENV: production
+      PORT: 5001
+
+      DATABASE_URL: mysql://invoicegen:@mysql:3306/invoicegen
+
+      REDIS_URL: redis://redis:6379
+
+      JWT_SECRET: abcdefghijklmnopqurstuvwxyz1234567890
+      JWT_REFRESH_SECRET: ABCDEFGHIJKLMNOPQURSTUVWXYZ1234567890
+
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+
+      EMAIL_PROVIDER: log
+
+      STORAGE_PROVIDER: local
+
+    ports:
+      - "5001:5001"
+
+    volumes:
+      - uploads_data:/app/uploads
+      - ./logs:/app/logs
+
+    networks:
+      - invoicegen-network
+
+volumes:
+  mysql_data:
+  redis_data:
+  uploads_data:
+
+networks:
+  invoicegen-network:
+    driver: bridge
