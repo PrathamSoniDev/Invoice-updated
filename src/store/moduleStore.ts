@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { create } from 'zustand';
 import type { ModuleConfig, ModuleKey } from '@/types';
 import { modulesApi } from '@/utils/api';
@@ -30,7 +31,7 @@ export const useModuleStore = create<ModuleState>((set, get) => ({
         roles: m.roles?.map((r: any) => r.role?.toLowerCase() as ModuleConfig['roles'][number]) || [],
       }));
       set({ modules, isLoading: false, isInitialized: true });
-    } catch (error) {
+    } catch {
       // Fallback to default modules if API fails
       const defaultModules: ModuleConfig[] = [
         { key: 'dashboard', label: 'Dashboard', description: 'Analytics overview', enabled: true, icon: 'LayoutDashboard', roles: ['admin', 'manager', 'staff', 'viewer'] },
@@ -59,7 +60,7 @@ export const useModuleStore = create<ModuleState>((set, get) => ({
           m.key === key ? { ...m, enabled: !m.enabled } : m
         ),
       }));
-    } catch (error) {
+    } catch {
       // Optimistically update anyway
       set((state) => ({
         modules: state.modules.map((m) =>
@@ -83,7 +84,7 @@ export const useModuleStore = create<ModuleState>((set, get) => ({
           m.key === key ? { ...m, roles } : m
         ),
       }));
-    } catch (error) {
+    } catch {
       // Optimistically update anyway
       set((state) => ({
         modules: state.modules.map((m) =>

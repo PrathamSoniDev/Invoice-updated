@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useState, useEffect, useCallback } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { StatCard } from '@/components/common/StatCard';
 import { ChartWrapper } from '@/components/common/ChartWrapper';
@@ -51,11 +52,7 @@ export function ReportsPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
 
-  useEffect(() => {
-    loadReportData();
-  }, [dateRange]);
-
-  const loadReportData = async () => {
+  const loadReportData = useCallback(async () => {
     setIsLoading(true);
     try {
       const [summaryData, revenue, invoicesData, customersData, paymentsData] = await Promise.all([
@@ -85,7 +82,11 @@ export function ReportsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [dateRange]);
+
+  useEffect(() => {
+    loadReportData();
+  }, [loadReportData]);
 
   const dateRangeLabel = { '7d': 'Last 7 days', '30d': 'Last 30 days', '3m': 'Last 3 months', '12m': 'Last 12 months' }[dateRange] || 'All time';
 

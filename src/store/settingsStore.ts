@@ -1,3 +1,4 @@
+ 
 import { create } from 'zustand';
 import type {
   CompanyInfo,
@@ -107,73 +108,57 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         isLoading: false,
         isInitialized: true,
       });
-    } catch (error) {
+    } catch {
       set({ isLoading: false, isInitialized: true });
     }
   },
 
   updateCompany: async (data: Partial<CompanyInfo>) => {
-    try {
-      const updateData = {
-        name: data.name,
-        legalName: data.legalName,
-        gstNumber: data.gstNumber,
-        panNumber: data.panNumber,
-        email: data.email,
-        phone: data.phone,
-        website: data.website,
-        addressLine1: data.address?.line1,
-        addressLine2: data.address?.line2,
-        city: data.address?.city,
-        state: data.address?.state,
-        pincode: data.address?.pincode,
-        country: data.address?.country,
-        logo: data.logo,
-        signature: data.signature,
-        primaryColor: data.primaryColor,
-        footerText: data.footerText,
-        showLogo: data.showLogo,
-      };
-      await settingsApi.updateCompanyProfile(updateData);
-      set((state) => ({
-        company: state.company ? { ...state.company, ...data } : null,
-      }));
-    } catch (error) {
-      throw error;
-    }
+    const updateData = {
+      name: data.name,
+      legalName: data.legalName,
+      gstNumber: data.gstNumber,
+      panNumber: data.panNumber,
+      email: data.email,
+      phone: data.phone,
+      website: data.website,
+      addressLine1: data.address?.line1,
+      addressLine2: data.address?.line2,
+      city: data.address?.city,
+      state: data.address?.state,
+      pincode: data.address?.pincode,
+      country: data.address?.country,
+      logo: data.logo,
+      signature: data.signature,
+      primaryColor: data.primaryColor,
+      footerText: data.footerText,
+      showLogo: data.showLogo,
+    };
+    await settingsApi.updateCompanyProfile(updateData);
+    set((state) => ({
+      company: state.company ? { ...state.company, ...data } : null,
+    }));
   },
 
   updateBank: async (data: Partial<BankInfo>) => {
-    try {
-      await settingsApi.upsertBankInfo(data);
-      set((state) => ({
-        bank: state.bank ? { ...state.bank, ...data } : data as BankInfo,
-      }));
-    } catch (error) {
-      throw error;
-    }
+    await settingsApi.upsertBankInfo(data);
+    set((state) => ({
+      bank: state.bank ? { ...state.bank, ...data } : data as BankInfo,
+    }));
   },
 
   updateInvoice: async (data: Partial<InvoiceSettings>) => {
-    try {
-      await settingsApi.updateInvoiceSettings(data);
-      set((state) => ({
-        invoice: state.invoice ? { ...state.invoice, ...data } : null,
-      }));
-    } catch (error) {
-      throw error;
-    }
+    await settingsApi.updateInvoiceSettings(data);
+    set((state) => ({
+      invoice: state.invoice ? { ...state.invoice, ...data } : null,
+    }));
   },
 
   updateCommunication: async (data: Partial<CommunicationSettings>) => {
-    try {
-      await settingsApi.updateCommunicationSettings(data);
-      set((state) => ({
-        communication: state.communication ? { ...state.communication, ...data } : null,
-      }));
-    } catch (error) {
-      throw error;
-    }
+    await settingsApi.updateCommunicationSettings(data);
+    set((state) => ({
+      communication: state.communication ? { ...state.communication, ...data } : null,
+    }));
   },
 
   updateGateways: async (data: Partial<GatewaySettings>) => {

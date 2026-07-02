@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Eye, EyeOff, Lock, ArrowLeft, Loader2, Check } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabase';
 
 const schema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
@@ -36,11 +37,13 @@ export function ResetPasswordPage() {
     { label: 'Contains number', met: /\d/.test(password) },
   ];
 
-  const onSubmit = async (_data: FormData) => {
+  const onSubmit = async (data: FormData) => {
     setIsLoading(true);
     try {
-      // Mock: simulate password reset
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      const { error } = await supabase.auth.updateUser({
+        password: data.password,
+      });
+      if (error) throw error;
       toast.success('Password reset successfully');
       navigate('/login');
     } catch (err) {

@@ -59,8 +59,8 @@ export function UserManagementPage() {
   const [status, setStatus] = useState<UserStatus>('invited');
 
   useEffect(() => {
-    userService.list().then((u) => {
-      setUsers(u);
+    userService.list().then((response) => {
+      setUsers(response.data);
       setLoading(false);
     });
   }, []);

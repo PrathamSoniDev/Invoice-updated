@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { create } from 'zustand';
-import type { User } from '@/types';
-import { authApi } from '@/utils/api';
+import { supabase } from '@/lib/supabase';
+import type { User, ModuleKey } from '@/types';
 
 interface AuthState {
   user: User | null;
@@ -14,145 +15,264 @@ interface AuthState {
   refreshUser: () => Promise<void>;
 }
 
-const AUTH_STORAGE_KEY = 'invoicegen-auth';
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+}
 
-const getStoredAuth = (): { user: User | null; accessToken: string | null; refreshToken: string | null } => {
-  try {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (!raw) return { user: null, accessToken: null, refreshToken: null };
-    return JSON.parse(raw);
-  } catch {
-    return { user: null, accessToken: null, refreshToken: null };
-  }
-};
+function generateAvatar(name: string): string {
+  const initials = getInitials(name);
+  const colors = ['3B82F6', '10B981', 'F59E0B', 'EF4444', '8B5CF6', 'EC4899'];
+  const colorIndex = name.charCodeAt(0) % colors.length;
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=${colors[colorIndex]}&color=fff&size=128`;
+}
 
-const setStoredAuth = (data: { user: User | null; accessToken?: string | null; refreshToken?: string | null }) => {
-  if (data.user) {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
-      user: data.user,
-      accessToken: data.accessToken,
-      refreshToken: data.refreshToken,
-    }));
-  } else {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-  }
-};
-
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isAuthenticated: false,
   isLoading: false,
   isInitialized: false,
 
   initialize: async () => {
-    const stored = getStoredAuth();
-    if (stored.accessToken && stored.user) {
-      // Set the token for API calls
-      localStorage.setItem('accessToken', stored.accessToken);
-      localStorage.setItem('refreshToken', stored.refreshToken || '');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
 
-      // Verify token is still valid
-      try {
-        const profile = await authApi.getProfile();
-        const user: User = {
-          id: profile.id,
-          name: profile.name,
-          email: profile.email,
-          role: profile.role.toLowerCase() as User['role'],
-          status: 'active',
-          permissions: profile.permissions as User['permissions'],
-          lastActive: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-        };
-        set({ user, isAuthenticated: true, isInitialized: true });
-      } catch {
-        // Token invalid, clear storage
-        setStoredAuth({ user: null });
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
+      if (session?.user) {
+        const { data: userData, error } = await supabase
+          .from('users')
+          .select('*, companies!users_companyId_fkey(*)')
+          .eq('id', session.user.id)
+          .single();
+
+        if (!error && userData) {
+          const company = userData.companies as any;
+          const user: User = {
+            id: userData.id,
+            name: userData.name,
+            email: userData.email,
+            role: userData.role.toLowerCase() as User['role'],
+            status: userData.status.toLowerCase() as User['status'],
+            avatar: userData.avatar || generateAvatar(userData.name),
+            phone: userData.phone || undefined,
+            companyName: company?.name,
+            permissions: (userData.permissions as ModuleKey[]) || [],
+            lastActive: userData.lastActiveAt || new Date().toISOString(),
+            createdAt: userData.createdAt,
+            companyInfo: company ? {
+              name: company.name,
+              legalName: company.legalName,
+              gstNumber: company.gstNumber || '',
+              panNumber: company.panNumber || '',
+              email: company.email,
+              phone: company.phone || '',
+              website: company.website || '',
+              address: {
+                line1: company.addressLine1,
+                line2: company.addressLine2 || '',
+                city: company.city,
+                state: company.state,
+                pincode: company.pincode,
+                country: company.country,
+              },
+              logo: company.logo || undefined,
+              signature: company.signature || undefined,
+              primaryColor: company.primaryColor || undefined,
+              footerText: company.footerText || undefined,
+              showLogo: company.showLogo ?? true,
+            } : undefined,
+          };
+          set({ user, isAuthenticated: true, isInitialized: true });
+        } else {
+          set({ isInitialized: true });
+        }
+      } else {
         set({ isInitialized: true });
       }
-    } else {
+    } catch (error) {
+      console.error('Auth initialization error:', error);
       set({ isInitialized: true });
     }
+
+    // Listen for auth changes
+    supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT') {
+        set({ user: null, isAuthenticated: false });
+      } else if (event === 'SIGNED_IN' && session?.user) {
+        // User signed in, fetch profile
+        get().refreshUser();
+      } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+        // Token refreshed, make sure we have user data
+        if (!get().user) {
+          get().refreshUser();
+        }
+      }
+    });
   },
 
-  login: async (email: string, password: string, rememberMe = false) => {
+  login: async (email: string, password: string, rememberMe?: boolean) => {
+    // Note: rememberMe is not directly supported by Supabase - session persistence is automatic
+    void rememberMe; // Acknowledge parameter
     set({ isLoading: true });
     try {
-      const response = await authApi.login({ email, password, rememberMe });
-
-      const user: User = {
-        id: response.user.id,
-        name: response.user.name,
-        email: response.user.email,
-        role: response.user.role.toLowerCase() as User['role'],
-        status: 'active',
-        permissions: response.user.permissions as User['permissions'],
-        lastActive: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
-      };
-
-      // Store tokens
-      localStorage.setItem('accessToken', response.accessToken);
-      localStorage.setItem('refreshToken', response.refreshToken);
-
-      setStoredAuth({
-        user,
-        accessToken: response.accessToken,
-        refreshToken: response.refreshToken,
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
 
-      set({ user, isAuthenticated: true, isLoading: false });
-      return { success: true };
+      if (error) {
+        set({ isLoading: false });
+        return { success: false, error: error.message };
+      }
+
+      if (data.user) {
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('*, companies!users_companyId_fkey(*)')
+          .eq('id', data.user.id)
+          .single();
+
+        if (userError || !userData) {
+          set({ isLoading: false });
+          return { success: false, error: 'User profile not found' };
+        }
+
+        const company = userData.companies as any;
+        const user: User = {
+          id: userData.id,
+          name: userData.name,
+          email: userData.email,
+          role: userData.role.toLowerCase() as User['role'],
+          status: userData.status.toLowerCase() as User['status'],
+          avatar: userData.avatar || generateAvatar(userData.name),
+          phone: userData.phone || undefined,
+          companyName: company?.name,
+          permissions: (userData.permissions as ModuleKey[]) || [],
+          lastActive: new Date().toISOString(),
+          createdAt: userData.createdAt,
+          companyInfo: company ? {
+            name: company.name,
+            legalName: company.legalName,
+            gstNumber: company.gstNumber || '',
+            panNumber: company.panNumber || '',
+            email: company.email,
+            phone: company.phone || '',
+            website: company.website || '',
+            address: {
+              line1: company.addressLine1,
+              line2: company.addressLine2 || '',
+              city: company.city,
+              state: company.state,
+              pincode: company.pincode,
+              country: company.country,
+            },
+            logo: company.logo || undefined,
+            signature: company.signature || undefined,
+            primaryColor: company.primaryColor || undefined,
+            footerText: company.footerText || undefined,
+            showLogo: company.showLogo ?? true,
+          } : undefined,
+        };
+
+        // Update last login
+        await supabase
+          .from('users')
+          .update({
+            lastLoginAt: new Date().toISOString(),
+            lastActiveAt: new Date().toISOString(),
+          })
+          .eq('id', userData.id);
+
+        set({ user, isAuthenticated: true, isLoading: false });
+        return { success: true };
+      }
+
+      set({ isLoading: false });
+      return { success: false, error: 'Login failed' };
     } catch (error: any) {
       set({ isLoading: false });
-      const message = error.response?.data?.error?.message || 'Invalid email or password';
-      return { success: false, error: message };
+      return { success: false, error: error.message || 'An unexpected error occurred' };
     }
   },
 
   logout: async () => {
     try {
-      await authApi.logout();
-    } catch {
-      // Ignore logout errors
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error('Logout error:', error);
     }
-    setStoredAuth({ user: null });
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
     set({ user: null, isAuthenticated: false });
   },
 
   updateUser: (userData) => {
     set((state) => {
       const updated = state.user ? { ...state.user, ...userData } : null;
-      if (updated) {
-        const stored = getStoredAuth();
-        setStoredAuth({ ...stored, user: updated });
-      }
       return { user: updated };
     });
   },
 
   refreshUser: async () => {
     try {
-      const profile = await authApi.getProfile();
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        set({ user: null, isAuthenticated: false });
+        return;
+      }
+
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('*, companies!users_companyId_fkey(*)')
+        .eq('id', authUser.id)
+        .single();
+
+      if (error || !userData) {
+        set({ user: null, isAuthenticated: false });
+        return;
+      }
+
+      const company = userData.companies as any;
       const user: User = {
-        id: profile.id,
-        name: profile.name,
-        email: profile.email,
-        role: profile.role.toLowerCase() as User['role'],
-        status: 'active',
-        permissions: profile.permissions as User['permissions'],
+        id: userData.id,
+        name: userData.name,
+        email: userData.email,
+        role: userData.role.toLowerCase() as User['role'],
+        status: userData.status.toLowerCase() as User['status'],
+        avatar: userData.avatar || generateAvatar(userData.name),
+        phone: userData.phone || undefined,
+        companyName: company?.name,
+        permissions: (userData.permissions as ModuleKey[]) || [],
         lastActive: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
+        createdAt: userData.createdAt,
+        companyInfo: company ? {
+          name: company.name,
+          legalName: company.legalName,
+          gstNumber: company.gstNumber || '',
+          panNumber: company.panNumber || '',
+          email: company.email,
+          phone: company.phone || '',
+          website: company.website || '',
+          address: {
+            line1: company.addressLine1,
+            line2: company.addressLine2 || '',
+            city: company.city,
+            state: company.state,
+            pincode: company.pincode,
+            country: company.country,
+          },
+          logo: company.logo || undefined,
+          signature: company.signature || undefined,
+          primaryColor: company.primaryColor || undefined,
+          footerText: company.footerText || undefined,
+          showLogo: company.showLogo ?? true,
+        } : undefined,
       };
-      const stored = getStoredAuth();
-      setStoredAuth({ ...stored, user });
-      set({ user });
+
+      set({ user, isAuthenticated: true });
     } catch (error) {
-      // Failed to refresh, might need to re-login
+      console.error('Refresh user error:', error);
     }
   },
 }));

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { create } from 'zustand';
 import type { ExternalIntegration, IntegrationLog, SyncHistory } from '@/types';
 import { integrationsApi } from '@/utils/api';
@@ -54,7 +55,7 @@ export const useIntegrationStore = create<IntegrationState>((set, get) => ({
         updatedAt: i.updatedAt,
       }));
       set({ integrations, isLoading: false, isInitialized: true });
-    } catch (error) {
+    } catch {
       set({ isLoading: false, isInitialized: true });
     }
   },
@@ -71,7 +72,7 @@ export const useIntegrationStore = create<IntegrationState>((set, get) => ({
         createdAt: l.createdAt,
       }));
       set({ logs });
-    } catch (error) {
+    } catch {
       // Handle error
     }
   },
@@ -91,7 +92,7 @@ export const useIntegrationStore = create<IntegrationState>((set, get) => ({
         completedAt: s.completedAt,
       }));
       set({ syncHistory });
-    } catch (error) {
+    } catch {
       // Handle error
     }
   },

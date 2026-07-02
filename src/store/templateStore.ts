@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { create } from 'zustand';
 import type { InvoiceTemplate, TemplateVersion, UserInvoiceTemplate } from '@/types';
 import { templatesApi } from '@/utils/api';
@@ -56,7 +57,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         updatedAt: t.updatedAt,
       }));
       set({ templates, isLoading: false, isInitialized: true });
-    } catch (error) {
+    } catch {
       set({ isLoading: false, isInitialized: true });
     }
   },
@@ -75,7 +76,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         createdAt: v.createdAt,
       }));
       set({ versions });
-    } catch (error) {
+    } catch {
       // Handle error
     }
   },
@@ -97,7 +98,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         updatedAt: ut.updatedAt,
       }));
       set({ userTemplates });
-    } catch (error) {
+    } catch {
       // Handle error
     }
   },

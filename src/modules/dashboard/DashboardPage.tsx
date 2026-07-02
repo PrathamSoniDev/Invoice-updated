@@ -18,6 +18,59 @@ import { dashboardApi } from '@/utils/api';
 import { invoiceService } from '@/services/invoiceService';
 import { formatCurrency, formatDate, getInitials } from '@/utils';
 
+interface DashboardMetrics {
+  totalInvoices: number;
+  totalCustomers: number;
+  totalRevenue: number;
+  paidRevenue: number;
+  pendingRevenue: number;
+  totalPaymentLinks: number;
+  successfulPayments: number;
+  failedPayments: number;
+}
+
+interface RevenueTrendPoint {
+  month: string;
+  revenue: number;
+  paid: number;
+  pending: number;
+}
+
+interface InvoiceTrendPoint {
+  month: string;
+  created: number;
+  paid: number;
+  overdue: number;
+}
+
+interface CustomerGrowthPoint {
+  month: string;
+  total: number;
+  new: number;
+}
+
+interface PaymentDistributionPoint {
+  name: string;
+  value: number;
+  color: string;
+}
+
+interface RecentInvoice {
+  id: string;
+  number: string;
+  customerName: string;
+  total: number;
+  createdAt: string;
+}
+
+interface ActivityItem {
+  id: string;
+  userName: string;
+  action: string;
+  description: string;
+  timestamp: string;
+}
+
 const chartTooltipStyle = {
   backgroundColor: 'hsl(var(--card))',
   border: '1px solid hsl(var(--border))',
@@ -31,7 +84,7 @@ const COLORS = ['hsl(var(--success))', 'hsl(var(--warning))', 'hsl(var(--destruc
 export function DashboardPage() {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
-  const [metrics, setMetrics] = useState<any>({
+  const [metrics, setMetrics] = useState<DashboardMetrics>({
     totalInvoices: 0,
     totalCustomers: 0,
     totalRevenue: 0,
@@ -41,12 +94,12 @@ export function DashboardPage() {
     successfulPayments: 0,
     failedPayments: 0,
   });
-  const [revenueTrend, setRevenueTrend] = useState<any[]>([]);
-  const [invoiceTrend, setInvoiceTrend] = useState<any[]>([]);
-  const [customerGrowth, setCustomerGrowth] = useState<any[]>([]);
-  const [paymentDistribution, setPaymentDistribution] = useState<any[]>([]);
-  const [recentInvoices, setRecentInvoices] = useState<any[]>([]);
-  const [activities, setActivities] = useState<any[]>([]);
+  const [revenueTrend, setRevenueTrend] = useState<RevenueTrendPoint[]>([]);
+  const [invoiceTrend, setInvoiceTrend] = useState<InvoiceTrendPoint[]>([]);
+  const [customerGrowth, setCustomerGrowth] = useState<CustomerGrowthPoint[]>([]);
+  const [paymentDistribution, setPaymentDistribution] = useState<PaymentDistributionPoint[]>([]);
+  const [recentInvoices, setRecentInvoices] = useState<RecentInvoice[]>([]);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
 
   useEffect(() => {
     loadDashboardData();
@@ -83,7 +136,7 @@ export function DashboardPage() {
       setCustomerGrowth(customers?.data || []);
       setPaymentDistribution(payments?.data || []);
       setRecentInvoices(recentInvs?.data || []);
-      setActivities(recentActs?.data || []);
+      setActivities(Array.isArray(recentActs) ? recentActs : recentActs?.data || []);
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
     } finally {
@@ -299,7 +352,7 @@ export function DashboardPage() {
             <CardTitle className="text-base">Recent Activity</CardTitle>
           </CardHeader>
           <CardContent>
-            <ActivityTimeline items={activities.map((a: any) => ({
+            <ActivityTimeline items={activities.map((a) => ({
               id: a.id,
               userName: a.userName,
               action: a.action,
