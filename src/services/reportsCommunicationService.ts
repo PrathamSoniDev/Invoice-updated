@@ -406,13 +406,15 @@ export const communicationService = {
   async sendInvoiceEmail(invoiceId: string): Promise<any> {
     const companyId = await getCurrentCompanyId();
 
-    // Get invoice details
-    const { data: invoice } = await supabase
+    // Scope invoice lookup by company so email actions cannot target another tenant.
+    const { data: invoice, error: invoiceError } = await supabase
       .from('invoices')
       .select('*, customers!invoices_customerId_fkey(name, email)')
+      .eq('companyId', companyId)
       .eq('id', invoiceId)
       .single();
 
+    if (invoiceError) throw invoiceError;
     if (!invoice) throw new Error('Invoice not found');
 
     // Log the communication
@@ -436,14 +438,16 @@ export const communicationService = {
 
     if (error) throw error;
 
-    // Update invoice status
-    await supabase
+    const { error: updateError } = await supabase
       .from('invoices')
       .update({
         status: 'SENT',
         sentAt: new Date().toISOString(),
       })
+      .eq('companyId', companyId)
       .eq('id', invoiceId);
+
+    if (updateError) throw updateError;
 
     await logActivity('update', 'invoice', invoiceId, `Sent invoice ${invoice.number} via email`);
 
@@ -514,22 +518,28 @@ export const exportsService = {
 
     // In a real app, this would queue a background job
     // For now, we'll just mark it as completed immediately
-    await supabase
+    const { error: completeError } = await supabase
       .from('export_history')
       .update({
         status: 'COMPLETED',
         completedAt: new Date().toISOString(),
         fileUrl: `/exports/${data.id}.${input.format}`,
       })
+      .eq('companyId', companyId)
       .eq('id', data.id);
 
-    return { exportId: data.id, status: 'PENDING' };
+    if (completeError) throw completeError;
+
+    return { exportId: data.id, status: 'COMPLETED' };
   },
 
   async getExportStatus(id: string): Promise<any> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('export_history')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
@@ -545,9 +555,12 @@ export const exportsService = {
   },
 
   async downloadExport(id: string): Promise<Blob> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('export_history')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 

@@ -24,8 +24,13 @@ $$;
 -- ============================================
 DROP POLICY IF EXISTS "service_all_companies" ON companies;
 
-CREATE POLICY "select_own_company" ON companies FOR SELECT
-  TO authenticated USING (id = public.get_company_id());
+DROP POLICY IF EXISTS "select_own_company" ON companies;
+
+CREATE POLICY "select_own_company"
+ON companies
+FOR SELECT
+TO authenticated
+USING (id = public.get_company_id());
 
 CREATE POLICY "update_own_company" ON companies FOR UPDATE
   TO authenticated USING (id = public.get_company_id() AND public.is_admin())

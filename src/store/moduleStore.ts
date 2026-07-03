@@ -2,6 +2,7 @@
 import { create } from 'zustand';
 import type { ModuleConfig, ModuleKey } from '@/types';
 import { modulesApi } from '@/utils/api';
+import { DEFAULT_ADMIN_PERMISSIONS, normalizeModuleKey, normalizeRoles, toDbModuleKey } from '@/utils/permissions';
 
 interface ModuleState {
   modules: ModuleConfig[];
@@ -22,14 +23,21 @@ export const useModuleStore = create<ModuleState>((set, get) => ({
     set({ isLoading: true });
     try {
       const response = await modulesApi.getModules();
-      const modules: ModuleConfig[] = response.map((m: any) => ({
-        key: m.key.toLowerCase() as ModuleKey,
-        label: m.label,
-        description: m.description || '',
-        enabled: m.enabled,
-        icon: m.icon,
-        roles: m.roles?.map((r: any) => r.role?.toLowerCase() as ModuleConfig['roles'][number]) || [],
-      }));
+      const modules: ModuleConfig[] = response
+        .map((m: any) => {
+          const key = normalizeModuleKey(m.key ?? m.module);
+          if (!key) return null;
+
+          return {
+            key,
+            label: m.label,
+            description: m.description || '',
+            enabled: m.enabled,
+            icon: m.icon,
+            roles: normalizeRoles(m.roles),
+          } satisfies ModuleConfig;
+        })
+        .filter((module): module is ModuleConfig => module !== null);
       set({ modules, isLoading: false, isInitialized: true });
     } catch {
       // Fallback to default modules if API fails
@@ -54,43 +62,35 @@ export const useModuleStore = create<ModuleState>((set, get) => ({
     if (!module) return;
 
     try {
-      await modulesApi.updateModule(key.toUpperCase(), { enabled: !module.enabled });
+      await modulesApi.updateModule(toDbModuleKey(key), { enabled: !module.enabled });
       set((state) => ({
         modules: state.modules.map((m) =>
           m.key === key ? { ...m, enabled: !m.enabled } : m
         ),
       }));
-    } catch {
-      // Optimistically update anyway
-      set((state) => ({
-        modules: state.modules.map((m) =>
-          m.key === key ? { ...m, enabled: !m.enabled } : m
-        ),
-      }));
+    } catch (error) {
+      console.error('[moduleStore] Failed to toggle module:', error);
+      throw error;
     }
   },
 
   isModuleEnabled: (key: ModuleKey) => {
     if (key === 'admin') return true;
     const mod = get().modules.find((m) => m.key === key);
-    return mod ? mod.enabled : true;
+    return mod ? mod.enabled : DEFAULT_ADMIN_PERMISSIONS.includes(key);
   },
 
   setModuleRoles: async (key: ModuleKey, roles: ModuleConfig['roles']) => {
     try {
-      await modulesApi.updateModuleRole(key.toUpperCase(), { roles: roles.map((r) => r.toUpperCase()) });
+      await modulesApi.updateModuleRole(toDbModuleKey(key), { roles: roles.map((r) => r.toUpperCase()) });
       set((state) => ({
         modules: state.modules.map((m) =>
           m.key === key ? { ...m, roles } : m
         ),
       }));
-    } catch {
-      // Optimistically update anyway
-      set((state) => ({
-        modules: state.modules.map((m) =>
-          m.key === key ? { ...m, roles } : m
-        ),
-      }));
+    } catch (error) {
+      console.error('[moduleStore] Failed to update module roles:', error);
+      throw error;
     }
   },
 }));

@@ -31,12 +31,20 @@ import {
 } from '@/components/ui/select';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { userService } from '@/services';
-import type { User, UserRole, UserStatus } from '@/types';
+import type { ModuleKey, User, UserRole, UserStatus } from '@/types';
 import { getInitials, formatDate } from '@/utils';
 import { ShieldCheck, Plus, Edit, Ban, Trash2, Building2, Eye, FileCode, Plug, CreditCard, MessageSquare, FileText, Activity } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTemplateStore } from '@/store/templateStore';
 import { useIntegrationStore } from '@/store/integrationStore';
+
+const ROLE_PERMISSIONS: Record<UserRole, ModuleKey[]> = {
+  admin: ['dashboard', 'customers', 'invoices', 'payment-links', 'whatsapp', 'email', 'reports', 'settings', 'admin'],
+  business: ['dashboard', 'customers', 'invoices', 'payment-links', 'reports', 'settings'],
+  manager: ['dashboard', 'customers', 'invoices', 'payment-links', 'whatsapp', 'email', 'reports', 'settings'],
+  staff: ['dashboard', 'customers', 'invoices', 'payment-links', 'whatsapp', 'email'],
+  viewer: ['dashboard', 'reports'],
+};
 
 export function UserManagementPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -55,8 +63,12 @@ export function UserManagementPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState<UserRole>('business');
+  const [role, setRole] = useState<UserRole>('staff');
   const [status, setStatus] = useState<UserStatus>('invited');
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editRole, setEditRole] = useState<UserRole>('staff');
+  const [editStatus, setEditStatus] = useState<UserStatus>('active');
 
   useEffect(() => {
     userService.list().then((response) => {
@@ -66,7 +78,15 @@ export function UserManagementPage() {
   }, []);
 
   const resetForm = () => {
-    setName(''); setCompanyName(''); setEmail(''); setPassword(''); setConfirmPassword(''); setRole('business'); setStatus('invited');
+    setName(''); setCompanyName(''); setEmail(''); setPassword(''); setConfirmPassword(''); setRole('staff'); setStatus('invited');
+  };
+
+  const openEditDialog = (user: User) => {
+    setEditUser(user);
+    setEditName(user.name);
+    setEditPhone(user.phone || '');
+    setEditRole(user.role);
+    setEditStatus(user.status);
   };
 
   const handleCreate = async () => {
@@ -82,32 +102,64 @@ export function UserManagementPage() {
       toast.error('Password must be at least 8 characters');
       return;
     }
-    const allMods = ['dashboard', 'customers', 'invoices', 'payment-links', 'whatsapp', 'email', 'reports', 'settings', 'admin'] as UserRole[] extends never ? never : ('dashboard' | 'customers' | 'invoices' | 'payment-links' | 'whatsapp' | 'email' | 'reports' | 'settings' | 'admin')[];
-    const businessMods = ['dashboard', 'customers', 'invoices', 'payment-links', 'reports', 'settings'] as ('dashboard' | 'customers' | 'invoices' | 'payment-links' | 'reports' | 'settings')[];
-    const newUser = await userService.create({
-      name, email, role, status, companyName,
-      permissions: role === 'admin' ? allMods : businessMods,
-    });
-    setUsers([...users, newUser]);
-    setCreateOpen(false);
-    resetForm();
-    toast.success('User created successfully');
+    try {
+      const newUser = await userService.create({
+        name, email, role, status, companyName,
+        permissions: ROLE_PERMISSIONS[role],
+      });
+      setUsers([...users, newUser]);
+      setCreateOpen(false);
+      resetForm();
+      toast.success('User created successfully');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to create user');
+    }
+  };
+
+  const handleEdit = async () => {
+    if (!editUser) return;
+    if (!editName.trim()) {
+      toast.error('Name is required');
+      return;
+    }
+
+    try {
+      const updatedUser = await userService.update(editUser.id, {
+        name: editName.trim(),
+        role: editRole,
+        status: editStatus,
+        phone: editPhone.trim(),
+      });
+      setUsers(users.map((u) => u.id === updatedUser.id ? updatedUser : u));
+      setEditUser(null);
+      toast.success('User updated');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update user');
+    }
   };
 
   const handleSuspend = async () => {
     if (!suspendUser) return;
-    await userService.suspend(suspendUser.id);
-    setUsers(users.map((u) => u.id === suspendUser.id ? { ...u, status: 'suspended' as UserStatus } : u));
-    setSuspendUser(null);
-    toast.success('User suspended');
+    try {
+      await userService.suspend(suspendUser.id);
+      setUsers(users.map((u) => u.id === suspendUser.id ? { ...u, status: 'suspended' as UserStatus } : u));
+      setSuspendUser(null);
+      toast.success('User suspended');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to suspend user');
+    }
   };
 
   const handleDelete = async () => {
     if (!deleteUser) return;
-    await userService.delete(deleteUser.id);
-    setUsers(users.filter((u) => u.id !== deleteUser.id));
-    setDeleteUser(null);
-    toast.success('User deleted');
+    try {
+      await userService.delete(deleteUser.id);
+      setUsers(users.filter((u) => u.id !== deleteUser.id));
+      setDeleteUser(null);
+      toast.success('User deleted');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete user');
+    }
   };
 
   const columns: Column<User>[] = [
@@ -154,7 +206,7 @@ export function UserManagementPage() {
           <Button variant="ghost" size="icon" className="h-8 w-8" title="View company settings" onClick={(e) => { e.stopPropagation(); setViewUser(row); }}>
             <Eye className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); setEditUser(row); }}>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); openEditDialog(row); }}>
             <Edit className="h-4 w-4" />
           </Button>
           {row.status !== 'suspended' && (
@@ -260,19 +312,19 @@ export function UserManagementPage() {
             <div className="space-y-4 py-2">
               <div className="space-y-2">
                 <Label>Full Name</Label>
-                <Input defaultValue={editUser.name} />
+                <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label>Company Name</Label>
-                <Input defaultValue={editUser.companyName || ''} />
+                <Label>Phone</Label>
+                <Input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label>Email</Label>
-                <Input type="email" defaultValue={editUser.email} />
+                <Input type="email" value={editUser.email} disabled />
               </div>
               <div className="space-y-2">
                 <Label>Role</Label>
-                <Select defaultValue={editUser.role}>
+                <Select value={editRole} onValueChange={(v) => setEditRole(v as UserRole)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Admin</SelectItem>
@@ -283,11 +335,22 @@ export function UserManagementPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={editStatus} onValueChange={(v) => setEditStatus(v as UserStatus)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="invited">Invited</SelectItem>
+                    <SelectItem value="suspended">Suspended</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditUser(null)}>Cancel</Button>
-            <Button onClick={() => { setEditUser(null); toast.success('User updated'); }}>Save Changes</Button>
+            <Button onClick={handleEdit}>Save Changes</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

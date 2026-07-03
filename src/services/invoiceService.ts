@@ -105,21 +105,24 @@ async function fetchInvoiceItems(invoiceId: string): Promise<InvoiceItemRow[]> {
 async function generateInvoiceNumber(): Promise<string> {
   const companyId = await getCurrentCompanyId();
 
-  const { data: settings } = await supabase
+  const { data: settings, error: settingsError } = await supabase
     .from('invoice_settings')
     .select('*')
     .eq('companyId', companyId)
-    .single();
+    .maybeSingle();
+
+  if (settingsError) throw settingsError;
 
   if (settings) {
     const nextNumber = settings.nextNumber || 1001;
     const prefix = settings.prefix || 'INV';
 
-    // Increment the next number
-    await supabase
+    const { error: updateSettingsError } = await supabase
       .from('invoice_settings')
       .update({ nextNumber: nextNumber + 1 })
       .eq('companyId', companyId);
+
+    if (updateSettingsError) throw updateSettingsError;
 
     return `${prefix}-${String(nextNumber).padStart(6, '0')}`;
   }
@@ -177,9 +180,12 @@ export const invoiceService = {
   },
 
   async get(id: string): Promise<Invoice> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('invoices')
       .select('*, customers!invoices_customerId_fkey(id, name, email, mobile, businessName)')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
@@ -244,6 +250,17 @@ export const invoiceService = {
     const discountAmount = input.discountAmount || 0;
     const total = subtotal + taxAmount - discountAmount;
 
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('companyId', companyId)
+      .eq('id', input.customerId)
+      .is('deletedAt', null)
+      .maybeSingle();
+
+    if (customerError) throw customerError;
+    if (!customer) throw new Error('Customer not found');
+
     const invoiceNumber = await generateInvoiceNumber();
 
     const { data: invoice, error: invoiceError } = await supabase
@@ -271,10 +288,9 @@ export const invoiceService = {
 
     if (invoiceError) throw invoiceError;
 
-    // Insert invoice items
     for (let i = 0; i < invoiceItems.length; i++) {
       const item = invoiceItems[i];
-      await supabase.from('invoice_items').insert({
+      const { error: itemError } = await supabase.from('invoice_items').insert({
         invoiceId: invoice.id,
         description: item.description,
         quantity: item.quantity,
@@ -284,15 +300,18 @@ export const invoiceService = {
         amount: item.amount,
         sortOrder: i,
       });
+
+      if (itemError) throw itemError;
     }
 
-    // Log invoice activity
-    await supabase.from('invoice_activities').insert({
+    const { error: activityError } = await supabase.from('invoice_activities').insert({
       invoiceId: invoice.id,
       userId,
       action: 'created',
       description: 'Invoice created',
     });
+
+    if (activityError) throw activityError;
 
     const result = await this.get(invoice.id);
 
@@ -317,26 +336,46 @@ export const invoiceService = {
     notes?: string;
     terms?: string;
   }>): Promise<Invoice> {
+    const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('invoices')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
+    if (existingError) throw existingError;
     if (!existing) throw new Error('Invoice not found');
+
+    if (input.customerId) {
+      const { data: customer, error: customerError } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('companyId', companyId)
+        .eq('id', input.customerId)
+        .is('deletedAt', null)
+        .maybeSingle();
+
+      if (customerError) throw customerError;
+      if (!customer) throw new Error('Customer not found');
+    }
+
     if (existing.status !== 'DRAFT') {
-      // Only allow updating certain fields for non-draft invoices
+      // Only allow updating notes and terms for invoices that are already issued.
       const allowedUpdates: Record<string, any> = { updatedById: userId };
       if (input.notes !== undefined) allowedUpdates.notes = input.notes;
       if (input.terms !== undefined) allowedUpdates.terms = input.terms;
 
       if (Object.keys(allowedUpdates).length > 1) {
-        await supabase
+        const { error: updateError } = await supabase
           .from('invoices')
           .update(allowedUpdates)
+          .eq('companyId', companyId)
           .eq('id', id);
+
+        if (updateError) throw updateError;
       }
 
       return this.get(id);
@@ -396,11 +435,13 @@ export const invoiceService = {
       if (input.notes !== undefined) updateData.notes = input.notes;
       if (input.terms !== undefined) updateData.terms = input.terms;
 
-      // Delete existing items and insert new ones
-      await supabase.from('invoice_items').delete().eq('invoiceId', id);
+      // Replace line items only after the invoice ownership has been verified above.
+      const { error: deleteItemsError } = await supabase.from('invoice_items').delete().eq('invoiceId', id);
+      if (deleteItemsError) throw deleteItemsError;
+
       for (let i = 0; i < invoiceItems.length; i++) {
         const item = invoiceItems[i];
-        await supabase.from('invoice_items').insert({
+        const { error: itemError } = await supabase.from('invoice_items').insert({
           invoiceId: id,
           description: item.description,
           quantity: item.quantity,
@@ -410,14 +451,18 @@ export const invoiceService = {
           amount: item.amount,
           sortOrder: i,
         });
+
+        if (itemError) throw itemError;
       }
 
-      await supabase.from('invoice_activities').insert({
+      const { error: activityError } = await supabase.from('invoice_activities').insert({
         invoiceId: id,
         userId,
         action: 'updated',
         description: 'Invoice items updated',
       });
+
+      if (activityError) throw activityError;
     } else {
       if (input.customerId) updateData.customerId = input.customerId;
       if (input.issueDate) updateData.issueDate = input.issueDate;
@@ -431,28 +476,35 @@ export const invoiceService = {
       if (input.terms !== undefined) updateData.terms = input.terms;
     }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('invoices')
       .update(updateData)
+      .eq('companyId', companyId)
       .eq('id', id);
+
+    if (updateError) throw updateError;
 
     return this.get(id);
   },
 
   async delete(id: string): Promise<boolean> {
+    const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('invoices')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
+    if (existingError) throw existingError;
     if (!existing) throw new Error('Invoice not found');
 
     const { error } = await supabase
       .from('invoices')
       .update({ deletedAt: new Date().toISOString(), updatedById: userId })
+      .eq('companyId', companyId)
       .eq('id', id);
 
     if (error) throw error;
@@ -464,6 +516,7 @@ export const invoiceService = {
   },
 
   async send(id: string): Promise<Invoice> {
+    const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
     const { error } = await supabase
@@ -473,31 +526,37 @@ export const invoiceService = {
         sentAt: new Date().toISOString(),
         updatedById: userId,
       })
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
 
     if (error) throw error;
 
-    await supabase.from('invoice_activities').insert({
+    const { error: activityError } = await supabase.from('invoice_activities').insert({
       invoiceId: id,
       userId,
       action: 'sent',
       description: 'Invoice sent to customer',
     });
 
+    if (activityError) throw activityError;
+
     return this.get(id);
   },
 
   async markAsPaid(id: string): Promise<Invoice> {
+    const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
-    const { data: invoice } = await supabase
+    const { data: invoice, error: invoiceError } = await supabase
       .from('invoices')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
+    if (invoiceError) throw invoiceError;
     if (!invoice) throw new Error('Invoice not found');
 
     const { error } = await supabase
@@ -509,40 +568,48 @@ export const invoiceService = {
         balance: 0,
         updatedById: userId,
       })
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
 
     if (error) throw error;
 
-    await supabase.from('invoice_activities').insert({
+    const { error: activityError } = await supabase.from('invoice_activities').insert({
       invoiceId: id,
       userId,
       action: 'paid',
       description: 'Invoice marked as paid',
     });
 
-    // Update customer stats
-    const { data: customer } = await supabase
+    if (activityError) throw activityError;
+
+    // Update customer stats only for the invoice's company-scoped customer.
+    const { data: customer, error: customerError } = await supabase
       .from('customers')
       .select('totalInvoices, totalRevenue')
+      .eq('companyId', companyId)
       .eq('id', invoice.customerId)
       .single();
 
-    if (customer) {
-      await supabase
-        .from('customers')
-        .update({
-          totalInvoices: (customer.totalInvoices || 0) + 1,
-          totalRevenue: parseFloat(customer.totalRevenue || 0) + parseFloat(invoice.total),
-        })
-        .eq('id', invoice.customerId);
-    }
+    if (customerError) throw customerError;
+
+    const { error: customerUpdateError } = await supabase
+      .from('customers')
+      .update({
+        totalInvoices: (customer.totalInvoices || 0) + 1,
+        totalRevenue: parseFloat(customer.totalRevenue || 0) + parseFloat(invoice.total),
+      })
+      .eq('companyId', companyId)
+      .eq('id', invoice.customerId);
+
+    if (customerUpdateError) throw customerUpdateError;
 
     return this.get(id);
   },
 
   async cancel(id: string): Promise<Invoice> {
+    const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
     const { error } = await supabase
@@ -552,18 +619,21 @@ export const invoiceService = {
         cancelledAt: new Date().toISOString(),
         updatedById: userId,
       })
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
 
     if (error) throw error;
 
-    await supabase.from('invoice_activities').insert({
+    const { error: activityError } = await supabase.from('invoice_activities').insert({
       invoiceId: id,
       userId,
       action: 'cancelled',
       description: 'Invoice cancelled',
     });
+
+    if (activityError) throw activityError;
 
     return this.get(id);
   },
@@ -589,9 +659,23 @@ export const invoiceService = {
   },
 
   async getByCustomerId(customerId: string): Promise<Invoice[]> {
+    const companyId = await getCurrentCompanyId();
+
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('companyId', companyId)
+      .eq('id', customerId)
+      .is('deletedAt', null)
+      .maybeSingle();
+
+    if (customerError) throw customerError;
+    if (!customer) throw new Error('Customer not found');
+
     const { data, error } = await supabase
       .from('invoices')
       .select('*, customers!invoices_customerId_fkey(id, name, email, mobile, businessName)')
+      .eq('companyId', companyId)
       .eq('customerId', customerId)
       .is('deletedAt', null)
       .order('createdAt', { ascending: false });

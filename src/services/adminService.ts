@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from '@/lib/supabase';
 import { getCurrentCompanyId, paginate, logAudit } from '@/lib/database';
-import type { User, ActivityLog, ModuleKey } from '@/types';
+import type { User, ActivityLog, ModuleConfig } from '@/types';
+import { normalizeModuleKey, normalizePermissions, normalizeRoles, toDbModuleKey } from '@/utils/permissions';
 
 function transformUser(row: any): User {
   return {
@@ -14,7 +15,7 @@ function transformUser(row: any): User {
     phone: row.phone || undefined,
     lastActive: row.lastActiveAt || undefined,
     createdAt: row.createdAt,
-    permissions: (row.permissions as ModuleKey[]) || [],
+    permissions: normalizePermissions(row.permissions),
     companyName: row.companies?.name,
   };
 }
@@ -65,7 +66,7 @@ export const adminService = {
       .from('users')
       .select('*, companies!users_companyId_fkey(id, name)')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
     if (!data) throw new Error('User not found');
@@ -94,7 +95,8 @@ export const adminService = {
     if (authError) throw authError;
     if (!authData.user) throw new Error('Failed to create user');
 
-    // Create the user profile
+    // Create the user profile (maybeSingle handles the insert-returning-one-row
+    // case without throwing 406 if zero rows are returned)
     const { data, error } = await supabase
       .from('users')
       .insert({
@@ -108,9 +110,10 @@ export const adminService = {
         permissions: input.permissions || [],
       })
       .select('*, companies!users_companyId_fkey(id, name)')
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
+    if (!data) throw new Error('Failed to create user profile');
 
     await logAudit('create', 'users', data.id, input.name, `Created user ${input.name}`);
 
@@ -169,21 +172,22 @@ export const adminService = {
   },
 
   async deleteUser(id: string): Promise<void> {
-    const { data: user } = await supabase
+    const { data: user, error: fetchError } = await supabase
       .from('users')
       .select('name')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    await supabase
+    if (fetchError) throw fetchError;
+
+    const { error } = await supabase
       .from('users')
       .update({ deletedAt: new Date().toISOString() })
       .eq('id', id);
 
-    await logAudit('delete', 'users', id, user?.name || 'Unknown', `Deleted user`);
+    if (error) throw error;
 
-    // Sign out the user
-    await supabase.auth.admin.deleteUser(id);
+    await logAudit('delete', 'users', id, user?.name || 'Unknown', `Deleted user`);
   },
 
   async restoreUser(id: string): Promise<User> {
@@ -319,7 +323,7 @@ export const adminService = {
   },
 
   // Module Management
-  async getModules(): Promise<any[]> {
+  async getModules(): Promise<ModuleConfig[]> {
     const companyId = await getCurrentCompanyId();
 
     const { data, error } = await supabase
@@ -331,11 +335,11 @@ export const adminService = {
 
     // Default modules if none exist
     if (!data || data.length === 0) {
-      const defaultModules = [
+      const defaultModules: ModuleConfig[] = [
         { key: 'dashboard', label: 'Dashboard', description: 'Analytics overview', enabled: true, icon: 'LayoutDashboard', roles: ['admin', 'manager', 'staff', 'viewer'] },
         { key: 'customers', label: 'Customers', description: 'Customer management', enabled: true, icon: 'Users', roles: ['admin', 'manager', 'staff'] },
         { key: 'invoices', label: 'Invoices', description: 'Invoice management', enabled: true, icon: 'FileText', roles: ['admin', 'manager', 'staff'] },
-        { key: 'payment_links', label: 'Payment Links', description: 'Payment links', enabled: true, icon: 'CreditCard', roles: ['admin', 'manager', 'staff'] },
+        { key: 'payment-links', label: 'Payment Links', description: 'Payment links', enabled: true, icon: 'CreditCard', roles: ['admin', 'manager', 'staff'] },
         { key: 'whatsapp', label: 'WhatsApp', description: 'WhatsApp communication', enabled: true, icon: 'MessageCircle', roles: ['admin', 'manager', 'staff'] },
         { key: 'email', label: 'Email', description: 'Email communication', enabled: true, icon: 'Mail', roles: ['admin', 'manager', 'staff'] },
         { key: 'reports', label: 'Reports', description: 'Business reports', enabled: true, icon: 'BarChart3', roles: ['admin', 'manager', 'viewer'] },
@@ -347,7 +351,7 @@ export const adminService = {
       for (const module of defaultModules) {
         await supabase.from('module_configs').insert({
           companyId,
-          module: module.key.toUpperCase(),
+          module: toDbModuleKey(module.key),
           enabled: module.enabled,
           roles: module.roles,
         });
@@ -356,12 +360,21 @@ export const adminService = {
       return defaultModules;
     }
 
-    return data.map((m) => ({
-      key: m.module.toLowerCase(),
-      label: m.module.charAt(0) + m.module.slice(1).toLowerCase().replace('_', ' '),
-      enabled: m.enabled,
-      roles: m.roles || [],
-    }));
+    return data
+      .map((m) => {
+        const key = normalizeModuleKey(m.module);
+        if (!key) return null;
+
+        return {
+          key,
+          label: m.module.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase()),
+          description: '',
+          enabled: m.enabled,
+          icon: '',
+          roles: normalizeRoles(m.roles),
+        } satisfies ModuleConfig;
+      })
+      .filter((module): module is ModuleConfig => module !== null);
   },
 
   async updateModule(key: string, input: { enabled?: boolean; roles?: string[] }): Promise<any> {
@@ -375,16 +388,19 @@ export const adminService = {
       .from('module_configs')
       .update(updateData)
       .eq('companyId', companyId)
-      .eq('module', key.toUpperCase())
+      .eq('module', toDbModuleKey(key))
       .select()
       .single();
 
     if (error) throw error;
 
+    const moduleKey = normalizeModuleKey(data.module);
+    if (!moduleKey) throw new Error(`Unknown module key returned by database: ${data.module}`);
+
     return {
-      key: data.module.toLowerCase(),
+      key: moduleKey,
       enabled: data.enabled,
-      roles: data.roles || [],
+      roles: normalizeRoles(data.roles),
     };
   },
 

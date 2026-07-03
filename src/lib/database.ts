@@ -52,7 +52,7 @@ export async function getCurrentCompanyId(): Promise<string> {
     .from('users')
     .select('companyId')
     .eq('id', userId)
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
   if (!data) throw new Error('User not found');
@@ -115,7 +115,7 @@ export async function logActivity(
       .from('users')
       .select('name')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
     await supabase.from('activity_logs').insert({
       companyId,
@@ -152,7 +152,7 @@ export async function logAudit(
       .from('users')
       .select('name, role')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
     await supabase.from('audit_logs').insert({
       companyId,

@@ -44,9 +44,12 @@ export const templatesService = {
   },
 
   async getTemplate(id: string): Promise<InvoiceTemplate | null> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('invoice_templates')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
@@ -119,13 +122,14 @@ export const templatesService = {
 
     if (error) throw error;
 
-    // Create initial version
-    await supabase.from('template_versions').insert({
+    const { error: versionError } = await supabase.from('template_versions').insert({
       templateId: data.id,
       version: 1,
       content: input.content || '',
       changedBy: userId,
     });
+
+    if (versionError) throw versionError;
 
     await logActivity('create', 'template', data.id, `Created template ${input.name}`);
 
@@ -146,14 +150,17 @@ export const templatesService = {
   },
 
   async updateTemplate(id: string, input: Partial<{ name: string; content: string; config: any }>): Promise<InvoiceTemplate> {
+    const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('invoice_templates')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
+    if (existingError) throw existingError;
     if (!existing) throw new Error('Template not found');
 
     const updateData: Record<string, any> = {};
@@ -165,19 +172,21 @@ export const templatesService = {
     const { data, error } = await supabase
       .from('invoice_templates')
       .update(updateData)
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
 
     if (error) throw error;
 
-    // Create new version
-    await supabase.from('template_versions').insert({
+    const { error: versionError } = await supabase.from('template_versions').insert({
       templateId: id,
       version: updateData.version,
       content: input.content || existing.content,
       changedBy: userId,
     });
+
+    if (versionError) throw versionError;
 
     return {
       id: data.id,
@@ -196,10 +205,15 @@ export const templatesService = {
   },
 
   async deleteTemplate(id: string): Promise<void> {
-    await supabase
+    const companyId = await getCurrentCompanyId();
+
+    const { error } = await supabase
       .from('invoice_templates')
       .update({ deletedAt: new Date().toISOString() })
+      .eq('companyId', companyId)
       .eq('id', id);
+
+    if (error) throw error;
   },
 
   async setAsDefault(id: string): Promise<InvoiceTemplate> {
@@ -211,10 +225,10 @@ export const templatesService = {
       .update({ isDefault: false })
       .eq('companyId', companyId);
 
-    // Set new default
     const { data, error } = await supabase
       .from('invoice_templates')
       .update({ isDefault: true, status: 'ACTIVE' })
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
@@ -238,9 +252,12 @@ export const templatesService = {
   },
 
   async activateTemplate(id: string): Promise<InvoiceTemplate> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('invoice_templates')
       .update({ status: 'ACTIVE' })
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
@@ -264,9 +281,12 @@ export const templatesService = {
   },
 
   async deactivateTemplate(id: string): Promise<InvoiceTemplate> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('invoice_templates')
       .update({ status: 'DISABLED' })
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
@@ -290,6 +310,9 @@ export const templatesService = {
   },
 
   async getVersions(templateId: string): Promise<TemplateVersion[]> {
+    const template = await this.getTemplate(templateId);
+    if (!template) throw new Error('Template not found');
+
     const { data, error } = await supabase
       .from('template_versions')
       .select('*')
@@ -310,12 +333,17 @@ export const templatesService = {
   },
 
   async rollbackToVersion(templateId: string, versionId: string): Promise<InvoiceTemplate> {
-    const { data: version } = await supabase
+    const template = await this.getTemplate(templateId);
+    if (!template) throw new Error('Template not found');
+
+    const { data: version, error: versionError } = await supabase
       .from('template_versions')
       .select('*')
+      .eq('templateId', templateId)
       .eq('id', versionId)
       .single();
 
+    if (versionError) throw versionError;
     if (!version) throw new Error('Version not found');
 
     return this.updateTemplate(templateId, { content: version.content });
@@ -352,15 +380,18 @@ export const templatesService = {
   },
 
   async getMyTemplate(): Promise<InvoiceTemplate | null> {
+    const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
-    const { data: assignment } = await supabase
+    const { data: assignment, error: assignmentError } = await supabase
       .from('user_invoice_templates')
       .select('templateId')
+      .eq('companyId', companyId)
       .eq('userId', userId)
       .eq('isDefault', true)
       .maybeSingle();
 
+    if (assignmentError) throw assignmentError;
     if (!assignment?.templateId) return this.getDefaultTemplate();
 
     return this.getTemplate(assignment.templateId);
@@ -425,13 +456,17 @@ export const integrationsService = {
   },
 
   async getIntegration(id: string): Promise<ExternalIntegration | null> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('external_integrations')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    if (error) return null;
+    if (error) throw error;
+    if (!data) return null;
 
     return {
       id: data.id,
@@ -497,6 +532,7 @@ export const integrationsService = {
     syncOptions: any;
     status: string;
   }>): Promise<ExternalIntegration> {
+    const companyId = await getCurrentCompanyId();
     const updateData: Record<string, any> = {};
     if (input.name !== undefined) updateData.name = input.name;
     if (input.description !== undefined) updateData.description = input.description;
@@ -507,6 +543,7 @@ export const integrationsService = {
     const { data, error } = await supabase
       .from('external_integrations')
       .update(updateData)
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
@@ -529,7 +566,15 @@ export const integrationsService = {
   },
 
   async deleteIntegration(id: string): Promise<void> {
-    await supabase.from('external_integrations').delete().eq('id', id);
+    const companyId = await getCurrentCompanyId();
+
+    const { error } = await supabase
+      .from('external_integrations')
+      .delete()
+      .eq('companyId', companyId)
+      .eq('id', id);
+
+    if (error) throw error;
   },
 
   async testConnection(id: string): Promise<{ success: boolean; message: string }> {
@@ -575,6 +620,9 @@ export const integrationsService = {
   },
 
   async getLogs(id: string, params?: { level?: string; page?: number; limit?: number }): Promise<{ data: IntegrationLog[]; total: number }> {
+    const integration = await this.getIntegration(id);
+    if (!integration) throw new Error('Integration not found');
+
     const page = params?.page || 1;
     const limit = params?.limit || 20;
 
@@ -604,6 +652,9 @@ export const integrationsService = {
   },
 
   async getSyncHistory(id: string, params?: { entityType?: string; status?: string; page?: number; limit?: number }): Promise<{ data: SyncHistory[]; total: number }> {
+    const integration = await this.getIntegration(id);
+    if (!integration) throw new Error('Integration not found');
+
     const page = params?.page || 1;
     const limit = params?.limit || 20;
 

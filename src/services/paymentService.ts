@@ -147,9 +147,12 @@ export const paymentService = {
   },
 
   async getLink(id: string): Promise<PaymentLink> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('payment_links')
       .select('*, customers!payment_links_customerId_fkey(id, name, email, businessName)')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
@@ -185,6 +188,17 @@ export const paymentService = {
     const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('companyId', companyId)
+      .eq('id', input.customerId)
+      .is('deletedAt', null)
+      .maybeSingle();
+
+    if (customerError) throw customerError;
+    if (!customer) throw new Error('Customer not found');
+
     const slug = generateSlug();
     const expiresAt = input.expiryDays
       ? new Date(Date.now() + input.expiryDays * 24 * 60 * 60 * 1000).toISOString()
@@ -216,12 +230,15 @@ export const paymentService = {
   },
 
   async updateLinkStatus(id: string, status: 'paid' | 'expired' | 'failed' | 'pending'): Promise<PaymentLink> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('payment_links')
       .update({
         status: status.toUpperCase(),
         updatedAt: new Date().toISOString(),
       })
+      .eq('companyId', companyId)
       .eq('id', id)
       .select('*, customers!payment_links_customerId_fkey(id, name, email, businessName)')
       .single();
@@ -236,6 +253,7 @@ export const paymentService = {
   },
 
   async cancelLink(id: string): Promise<PaymentLink> {
+    const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
     const { data, error } = await supabase
@@ -244,6 +262,7 @@ export const paymentService = {
         deletedAt: new Date().toISOString(),
         updatedById: userId,
       })
+      .eq('companyId', companyId)
       .eq('id', id)
       .select('*, customers!payment_links_customerId_fkey(id, name, email, businessName)')
       .single();
@@ -283,9 +302,12 @@ export const paymentService = {
   },
 
   async getPayment(id: string): Promise<Payment> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('payments')
       .select('*, customers!payments_customerId_fkey(id, name, email, businessName), invoices!payments_invoiceId_fkey(id, number)')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
@@ -327,18 +349,20 @@ export const paymentService = {
 
     // Update invoice if provided
     if (input.invoiceId) {
-      const { data: invoice } = await supabase
+      const { data: invoice, error: invoiceError } = await supabase
         .from('invoices')
         .select('amountPaid, balance, total')
+        .eq('companyId', companyId)
         .eq('id', input.invoiceId)
         .single();
 
+      if (invoiceError) throw invoiceError;
       if (invoice) {
         const newAmountPaid = parseFloat(invoice.amountPaid) + input.amount;
         const newBalance = parseFloat(invoice.total) - newAmountPaid;
         const isPaid = newBalance <= 0;
 
-        await supabase
+        const { error: invoiceUpdateError } = await supabase
           .from('invoices')
           .update({
             amountPaid: newAmountPaid,
@@ -346,36 +370,47 @@ export const paymentService = {
             status: isPaid ? 'PAID' : 'SENT',
             paidAt: isPaid ? new Date().toISOString() : null,
           })
+          .eq('companyId', companyId)
           .eq('id', input.invoiceId);
+
+        if (invoiceUpdateError) throw invoiceUpdateError;
       }
     }
 
     // Update payment link if provided
     if (input.paymentLinkId) {
-      await supabase
+      const { error: linkUpdateError } = await supabase
         .from('payment_links')
         .update({
           status: 'PAID',
           paymentCount: 1,
           updatedAt: new Date().toISOString(),
         })
+        .eq('companyId', companyId)
         .eq('id', input.paymentLinkId);
+
+      if (linkUpdateError) throw linkUpdateError;
     }
 
     // Update customer stats
-    const { data: customer } = await supabase
+    const { data: customer, error: customerError } = await supabase
       .from('customers')
       .select('outstandingAmount')
+      .eq('companyId', companyId)
       .eq('id', input.customerId)
       .single();
 
+    if (customerError) throw customerError;
     if (customer) {
-      await supabase
+      const { error: customerUpdateError } = await supabase
         .from('customers')
         .update({
           outstandingAmount: Math.max(0, parseFloat(customer.outstandingAmount || 0) - input.amount),
         })
+        .eq('companyId', companyId)
         .eq('id', input.customerId);
+
+      if (customerUpdateError) throw customerUpdateError;
     }
 
     await logActivity('create', 'payment', data.id, `Recorded payment of ${input.amount}`, { payment: data });
@@ -384,12 +419,15 @@ export const paymentService = {
   },
 
   async refundPayment(id: string): Promise<Payment> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('payments')
       .update({
         status: 'REFUNDED',
         updatedAt: new Date().toISOString(),
       })
+      .eq('companyId', companyId)
       .eq('id', id)
       .select('*, customers!payments_customerId_fkey(id, name, email, businessName), invoices!payments_invoiceId_fkey(id, number)')
       .single();
@@ -402,9 +440,12 @@ export const paymentService = {
   },
 
   async getPaymentsByCustomerId(customerId: string): Promise<Payment[]> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('payments')
       .select('*, customers!payments_customerId_fkey(id, name, email, businessName), invoices!payments_invoiceId_fkey(id, number)')
+      .eq('companyId', companyId)
       .eq('customerId', customerId)
       .order('date', { ascending: false });
 
@@ -414,9 +455,12 @@ export const paymentService = {
   },
 
   async getPaymentsByInvoiceId(invoiceId: string): Promise<Payment[]> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('payments')
       .select('*, customers!payments_customerId_fkey(id, name, email, businessName), invoices!payments_invoiceId_fkey(id, number)')
+      .eq('companyId', companyId)
       .eq('invoiceId', invoiceId)
       .order('date', { ascending: false });
 

@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { create } from 'zustand';
-import { supabase } from '@/lib/supabase';
-import type { User, ModuleKey } from '@/types';
+import { supabase, ensureUserProfile, fetchUserProfile, type UserProfile } from '@/lib/supabase';
+import type { User } from '@/types';
+import { normalizePermissions } from '@/utils/permissions';
 
 interface AuthState {
   user: User | null;
@@ -31,6 +32,50 @@ function generateAvatar(name: string): string {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=${colors[colorIndex]}&color=fff&size=128`;
 }
 
+/**
+ * Map a raw `public.users` profile row (joined with its company) into the
+ * frontend `User` shape. Centralised here so every auth entry point
+ * (initialize / login / refreshUser) maps profiles identically.
+ */
+function mapProfileToUser(userData: UserProfile): User {
+  const company = userData.companies as any;
+  return {
+    id: userData.id,
+    name: userData.name,
+    email: userData.email,
+    role: userData.role.toLowerCase() as User['role'],
+    status: userData.status.toLowerCase() as User['status'],
+    avatar: userData.avatar || generateAvatar(userData.name),
+    phone: userData.phone || undefined,
+    companyName: company?.name,
+    permissions: normalizePermissions(userData.permissions),
+    lastActive: userData.lastActiveAt || new Date().toISOString(),
+    createdAt: userData.createdAt,
+    companyInfo: company ? {
+      name: company.name,
+      legalName: company.legalName,
+      gstNumber: company.gstNumber || '',
+      panNumber: company.panNumber || '',
+      email: company.email,
+      phone: company.phone || '',
+      website: company.website || '',
+      address: {
+        line1: company.addressLine1,
+        line2: company.addressLine2 || '',
+        city: company.city,
+        state: company.state,
+        pincode: company.pincode,
+        country: company.country,
+      },
+      logo: company.logo || undefined,
+      signature: company.signature || undefined,
+      primaryColor: company.primaryColor || undefined,
+      footerText: company.footerText || undefined,
+      showLogo: company.showLogo ?? true,
+    } : undefined,
+  };
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isAuthenticated: false,
@@ -42,50 +87,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session?.user) {
-        const { data: userData, error } = await supabase
-          .from('users')
-          .select('*, companies!users_companyId_fkey(*)')
-          .eq('id', session.user.id)
-          .single();
+        // Ensure a profile exists (fixes the 406 error for users whose
+        // auth.users row has no matching public.users profile).
+        const profile = await ensureUserProfile(session.user);
 
-        if (!error && userData) {
-          const company = userData.companies as any;
-          const user: User = {
-            id: userData.id,
-            name: userData.name,
-            email: userData.email,
-            role: userData.role.toLowerCase() as User['role'],
-            status: userData.status.toLowerCase() as User['status'],
-            avatar: userData.avatar || generateAvatar(userData.name),
-            phone: userData.phone || undefined,
-            companyName: company?.name,
-            permissions: (userData.permissions as ModuleKey[]) || [],
-            lastActive: userData.lastActiveAt || new Date().toISOString(),
-            createdAt: userData.createdAt,
-            companyInfo: company ? {
-              name: company.name,
-              legalName: company.legalName,
-              gstNumber: company.gstNumber || '',
-              panNumber: company.panNumber || '',
-              email: company.email,
-              phone: company.phone || '',
-              website: company.website || '',
-              address: {
-                line1: company.addressLine1,
-                line2: company.addressLine2 || '',
-                city: company.city,
-                state: company.state,
-                pincode: company.pincode,
-                country: company.country,
-              },
-              logo: company.logo || undefined,
-              signature: company.signature || undefined,
-              primaryColor: company.primaryColor || undefined,
-              footerText: company.footerText || undefined,
-              showLogo: company.showLogo ?? true,
-            } : undefined,
-          };
-          set({ user, isAuthenticated: true, isInitialized: true });
+        if (profile) {
+          set({ user: mapProfileToUser(profile), isAuthenticated: true, isInitialized: true });
         } else {
           set({ isInitialized: true });
         }
@@ -129,64 +136,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       if (data.user) {
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('*, companies!users_companyId_fkey(*)')
-          .eq('id', data.user.id)
-          .single();
+        // Ensure a profile exists for this user (covers existing auth users
+        // that never received a public.users row, e.g. invited users).
+        const profile = await ensureUserProfile(data.user);
 
-        if (userError || !userData) {
+        if (!profile) {
           set({ isLoading: false });
-          return { success: false, error: 'User profile not found' };
+          return { success: false, error: 'Unable to load user profile. Please contact support.' };
         }
 
-        const company = userData.companies as any;
-        const user: User = {
-          id: userData.id,
-          name: userData.name,
-          email: userData.email,
-          role: userData.role.toLowerCase() as User['role'],
-          status: userData.status.toLowerCase() as User['status'],
-          avatar: userData.avatar || generateAvatar(userData.name),
-          phone: userData.phone || undefined,
-          companyName: company?.name,
-          permissions: (userData.permissions as ModuleKey[]) || [],
-          lastActive: new Date().toISOString(),
-          createdAt: userData.createdAt,
-          companyInfo: company ? {
-            name: company.name,
-            legalName: company.legalName,
-            gstNumber: company.gstNumber || '',
-            panNumber: company.panNumber || '',
-            email: company.email,
-            phone: company.phone || '',
-            website: company.website || '',
-            address: {
-              line1: company.addressLine1,
-              line2: company.addressLine2 || '',
-              city: company.city,
-              state: company.state,
-              pincode: company.pincode,
-              country: company.country,
-            },
-            logo: company.logo || undefined,
-            signature: company.signature || undefined,
-            primaryColor: company.primaryColor || undefined,
-            footerText: company.footerText || undefined,
-            showLogo: company.showLogo ?? true,
-          } : undefined,
-        };
-
-        // Update last login
+        // Update last login (non-blocking; failure is logged, not fatal)
         await supabase
           .from('users')
           .update({
             lastLoginAt: new Date().toISOString(),
             lastActiveAt: new Date().toISOString(),
           })
-          .eq('id', userData.id);
+          .eq('id', profile.id);
 
-        set({ user, isAuthenticated: true, isLoading: false });
+        set({ user: mapProfileToUser(profile), isAuthenticated: true, isLoading: false });
         return { success: true };
       }
 
@@ -222,55 +190,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return;
       }
 
-      const { data: userData, error } = await supabase
-        .from('users')
-        .select('*, companies!users_companyId_fkey(*)')
-        .eq('id', authUser.id)
-        .single();
+      // Use maybeSingle() via fetchUserProfile so a missing profile returns
+      // null instead of throwing a 406, then ensure one exists.
+      let profile = await fetchUserProfile(authUser.id);
+      if (!profile) {
+        profile = await ensureUserProfile(authUser);
+      }
 
-      if (error || !userData) {
+      if (!profile) {
         set({ user: null, isAuthenticated: false });
         return;
       }
 
-      const company = userData.companies as any;
-      const user: User = {
-        id: userData.id,
-        name: userData.name,
-        email: userData.email,
-        role: userData.role.toLowerCase() as User['role'],
-        status: userData.status.toLowerCase() as User['status'],
-        avatar: userData.avatar || generateAvatar(userData.name),
-        phone: userData.phone || undefined,
-        companyName: company?.name,
-        permissions: (userData.permissions as ModuleKey[]) || [],
-        lastActive: new Date().toISOString(),
-        createdAt: userData.createdAt,
-        companyInfo: company ? {
-          name: company.name,
-          legalName: company.legalName,
-          gstNumber: company.gstNumber || '',
-          panNumber: company.panNumber || '',
-          email: company.email,
-          phone: company.phone || '',
-          website: company.website || '',
-          address: {
-            line1: company.addressLine1,
-            line2: company.addressLine2 || '',
-            city: company.city,
-            state: company.state,
-            pincode: company.pincode,
-            country: company.country,
-          },
-          logo: company.logo || undefined,
-          signature: company.signature || undefined,
-          primaryColor: company.primaryColor || undefined,
-          footerText: company.footerText || undefined,
-          showLogo: company.showLogo ?? true,
-        } : undefined,
-      };
-
-      set({ user, isAuthenticated: true });
+      set({ user: mapProfileToUser(profile), isAuthenticated: true });
     } catch (error) {
       console.error('Refresh user error:', error);
     }

@@ -123,11 +123,13 @@ export const settingsService = {
     const companyId = await getCurrentCompanyId();
 
     // Check if bank info exists
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('bank_info')
       .select('*')
       .eq('companyId', companyId)
       .maybeSingle();
+
+    if (existingError) throw existingError;
 
     if (existing) {
       const { data, error } = await supabase
@@ -183,7 +185,9 @@ export const settingsService = {
 
   async deleteBankInfo(): Promise<void> {
     const companyId = await getCurrentCompanyId();
-    await supabase.from('bank_info').delete().eq('companyId', companyId);
+    const { error } = await supabase.from('bank_info').delete().eq('companyId', companyId);
+
+    if (error) throw error;
   },
 
   async getInvoiceSettings(): Promise<InvoiceSettings | null> {
@@ -212,11 +216,13 @@ export const settingsService = {
   async updateInvoiceSettings(input: Partial<InvoiceSettings>): Promise<InvoiceSettings> {
     const companyId = await getCurrentCompanyId();
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('invoice_settings')
       .select('*')
       .eq('companyId', companyId)
       .maybeSingle();
+
+    if (existingError) throw existingError;
 
     const updateData: Record<string, any> = {};
     if (input.prefix !== undefined) updateData.prefix = input.prefix;
@@ -296,11 +302,13 @@ export const settingsService = {
   async updateCommunicationSettings(input: Partial<CommunicationSettings>): Promise<CommunicationSettings> {
     const companyId = await getCurrentCompanyId();
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('communication_settings')
       .select('*')
       .eq('companyId', companyId)
       .maybeSingle();
+
+    if (existingError) throw existingError;
 
     const updateData: Record<string, any> = {};
     if (input.whatsappEnabled !== undefined) updateData.whatsappEnabled = input.whatsappEnabled;
@@ -409,6 +417,7 @@ export const settingsService = {
   },
 
   async updateTaxConfiguration(id: string, input: Partial<{ name: string; type: string; rate: number; isDefault: boolean }>): Promise<any> {
+    const companyId = await getCurrentCompanyId();
     const updateData: Record<string, any> = {};
     if (input.name !== undefined) updateData.name = input.name;
     if (input.type !== undefined) updateData.type = input.type.toUpperCase();
@@ -418,6 +427,7 @@ export const settingsService = {
     const { data, error } = await supabase
       .from('tax_configurations')
       .update(updateData)
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
@@ -427,9 +437,12 @@ export const settingsService = {
   },
 
   async deleteTaxConfiguration(id: string): Promise<void> {
+    const companyId = await getCurrentCompanyId();
+
     const { error } = await supabase
       .from('tax_configurations')
       .update({ isActive: false })
+      .eq('companyId', companyId)
       .eq('id', id);
 
     if (error) throw error;
@@ -465,11 +478,13 @@ export const settingsService = {
   async updateUserSettings(input: any): Promise<any> {
     const userId = await getCurrentUserId();
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('user_settings')
       .select('*')
       .eq('userId', userId)
       .maybeSingle();
+
+    if (existingError) throw existingError;
 
     const updateData: Record<string, any> = {};
     if (input.theme !== undefined) updateData.theme = input.theme;

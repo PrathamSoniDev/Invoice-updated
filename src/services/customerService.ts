@@ -101,6 +101,36 @@ function toDbFormat(customer: Partial<Customer> & { name: string; businessName: 
   };
 }
 
+function toDbUpdateFormat(customer: Partial<Customer>) {
+  const update: Record<string, any> = {};
+
+  if (customer.name !== undefined) update.name = customer.name;
+  if (customer.businessName !== undefined) update.businessName = customer.businessName;
+  if (customer.gstNumber !== undefined) update.gstNumber = customer.gstNumber || null;
+  if (customer.email !== undefined) update.email = customer.email;
+  if (customer.mobile !== undefined) update.mobile = customer.mobile;
+  if (customer.whatsapp !== undefined) update.whatsapp = customer.whatsapp || null;
+  if (customer.notes !== undefined) update.notes = customer.notes || null;
+  if (customer.billingAddress) {
+    update.billingLine1 = customer.billingAddress.line1 || '';
+    update.billingLine2 = customer.billingAddress.line2 || null;
+    update.billingCity = customer.billingAddress.city || '';
+    update.billingState = customer.billingAddress.state || '';
+    update.billingPincode = customer.billingAddress.pincode || '';
+    update.billingCountry = customer.billingAddress.country || 'India';
+  }
+  if (customer.shippingAddress) {
+    update.shippingLine1 = customer.shippingAddress.line1 || null;
+    update.shippingLine2 = customer.shippingAddress.line2 || null;
+    update.shippingCity = customer.shippingAddress.city || null;
+    update.shippingState = customer.shippingAddress.state || null;
+    update.shippingPincode = customer.shippingAddress.pincode || null;
+    update.shippingCountry = customer.shippingAddress.country || null;
+  }
+
+  return update;
+}
+
 export const customerService = {
   async list(params?: {
     search?: string;
@@ -137,9 +167,12 @@ export const customerService = {
   },
 
   async get(id: string): Promise<Customer> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('customers')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
@@ -178,18 +211,21 @@ export const customerService = {
   },
 
   async update(id: string, input: Partial<Customer>): Promise<Customer> {
+    const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('customers')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
+    if (existingError) throw existingError;
     if (!existing) throw new Error('Customer not found');
 
     const updateData: Record<string, any> = {
-      ...toDbFormat(input as any),
+      ...toDbUpdateFormat(input),
       updatedById: userId,
     };
 
@@ -200,6 +236,7 @@ export const customerService = {
     const { data, error } = await supabase
       .from('customers')
       .update(updateData)
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
@@ -215,19 +252,23 @@ export const customerService = {
   },
 
   async delete(id: string): Promise<boolean> {
+    const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('customers')
       .select('*')
+      .eq('companyId', companyId)
       .eq('id', id)
       .single();
 
+    if (existingError) throw existingError;
     if (!existing) throw new Error('Customer not found');
 
     const { error } = await supabase
       .from('customers')
       .update({ deletedAt: new Date().toISOString(), updatedById: userId })
+      .eq('companyId', companyId)
       .eq('id', id);
 
     if (error) throw error;
@@ -239,9 +280,13 @@ export const customerService = {
   },
 
   async restore(id: string): Promise<Customer> {
+    const companyId = await getCurrentCompanyId();
+    const userId = await getCurrentUserId();
+
     const { data, error } = await supabase
       .from('customers')
-      .update({ deletedAt: null })
+      .update({ deletedAt: null, updatedById: userId })
+      .eq('companyId', companyId)
       .eq('id', id)
       .select()
       .single();
@@ -252,9 +297,12 @@ export const customerService = {
   },
 
   async getByEmail(email: string): Promise<Customer | null> {
+    const companyId = await getCurrentCompanyId();
+
     const { data, error } = await supabase
       .from('customers')
       .select('*')
+      .eq('companyId', companyId)
       .eq('email', email)
       .is('deletedAt', null)
       .maybeSingle();

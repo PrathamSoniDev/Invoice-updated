@@ -1,5 +1,6 @@
  
-import { supabase } from '@/lib/supabase';
+import { supabase, ensureUserProfile, fetchUserProfile } from '@/lib/supabase';
+import { normalizePermissions } from '@/utils/permissions';
 
 // Auth Types
 export interface LoginRequest {
@@ -47,15 +48,9 @@ export const authApi = {
     if (error) throw error;
     if (!authData.user || !authData.session) throw new Error('Login failed');
 
-    // Get user profile from public.users
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('*, companies!users_companyId_fkey(*)')
-      .eq('id', authData.user.id)
-      .single();
-
-    if (userError) throw userError;
-    if (!userData) throw new Error('User profile not found');
+    // Ensure a profile exists (fixes 406 for users without a public.users row)
+    const userData = await ensureUserProfile(authData.user);
+    if (!userData) throw new Error('User profile not found and could not be created');
 
     return {
       user: {
@@ -64,7 +59,7 @@ export const authApi = {
         name: userData.name,
         role: userData.role.toLowerCase(),
         companyId: userData.companyId,
-        permissions: (userData.permissions as string[]) || [],
+        permissions: normalizePermissions(userData.permissions),
       },
       accessToken: authData.session.access_token,
       refreshToken: authData.session.refresh_token,
@@ -73,13 +68,15 @@ export const authApi = {
   },
 
   async register(data: RegisterRequest): Promise<LoginResponse> {
-    // Create the auth user
+    // Create the auth user. Company/profile creation is delegated to
+    // ensureUserProfile() so it is idempotent and never creates duplicates.
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: data.email,
       password: data.password,
       options: {
         data: {
           name: data.name,
+          companyName: data.companyName,
         },
       },
     });
@@ -87,52 +84,24 @@ export const authApi = {
     if (authError) throw authError;
     if (!authData.user) throw new Error('Registration failed');
 
-    // Create the company
-    const { data: companyData, error: companyError } = await supabase
-      .from('companies')
-      .insert({
-        name: data.companyName,
-        legalName: data.companyName,
-        gstNumber: data.companyGST || null,
-        phone: data.companyPhone || null,
-        email: data.email,
-        addressLine1: data.companyAddress || '',
-        city: data.companyCity || '',
-        state: data.companyState || '',
-        pincode: data.companyPincode || '',
-      })
-      .select()
-      .single();
+    // Ensure the profile (and company) exist. ensureUserProfile is idempotent:
+    // if a profile already exists it is returned unchanged.
+    const userData = await ensureUserProfile(authData.user);
+    if (!userData) throw new Error('Failed to create user profile');
 
-    if (companyError) throw new Error('Failed to create company');
+    const companyId = userData.companyId;
 
-    // Create user profile with admin role
-    const { error: userError } = await supabase
-      .from('users')
-      .insert({
-        id: authData.user.id,
-        companyId: companyData.id,
-        name: data.name,
-        email: data.email,
-        phone: data.phone || null,
-        role: 'ADMIN',
-        status: 'ACTIVE',
-        permissions: ['dashboard', 'customers', 'invoices', 'payment_links', 'whatsapp', 'email', 'reports', 'settings', 'admin'],
-      });
-
-    if (userError) throw new Error('Failed to create user profile');
-
-    // Create default settings for the company
-    await supabase.from('invoice_settings').insert({
-      companyId: companyData.id,
+    // Create default settings for the company (best-effort; failures logged)
+    await supabase.from('invoice_settings').insert({ companyId }).then(({ error }) => {
+      if (error) console.error('[register] invoice_settings insert failed:', error.message);
     });
 
-    await supabase.from('communication_settings').insert({
-      companyId: companyData.id,
+    await supabase.from('communication_settings').insert({ companyId }).then(({ error }) => {
+      if (error) console.error('[register] communication_settings insert failed:', error.message);
     });
 
-    await supabase.from('gateway_settings').insert({
-      companyId: companyData.id,
+    await supabase.from('gateway_settings').insert({ companyId }).then(({ error }) => {
+      if (error) console.error('[register] gateway_settings insert failed:', error.message);
     });
 
     // Create default modules
@@ -141,12 +110,15 @@ export const authApi = {
     ];
 
     for (const module of modules) {
-      await supabase.from('module_configs').insert({
-        companyId: companyData.id,
+      const { error: moduleError } = await supabase.from('module_configs').insert({
+        companyId,
         module,
         enabled: true,
         roles: module === 'ADMIN' ? ['ADMIN'] : ['ADMIN', 'MANAGER', 'STAFF'],
       });
+      if (moduleError) {
+        console.error(`[register] module_configs insert failed for ${module}:`, moduleError.message);
+      }
     }
 
     if (!authData.session) throw new Error('Session not created');
@@ -155,10 +127,10 @@ export const authApi = {
       user: {
         id: authData.user.id,
         email: authData.user.email || '',
-        name: data.name,
-        role: 'admin',
-        companyId: companyData.id,
-        permissions: ['dashboard', 'customers', 'invoices', 'payment_links', 'whatsapp', 'email', 'reports', 'settings', 'admin'],
+        name: userData.name,
+        role: userData.role.toLowerCase(),
+        companyId,
+        permissions: normalizePermissions(userData.permissions),
       },
       accessToken: authData.session.access_token,
       refreshToken: authData.session.refresh_token,
@@ -189,21 +161,20 @@ export const authApi = {
     if (authError) throw authError;
     if (!user) throw new Error('Not authenticated');
 
-    const { data, error } = await supabase
-      .from('users')
-      .select('id, name, email, role, permissions')
-      .eq('id', user.id)
-      .single();
-
-    if (error) throw error;
-    if (!data) throw new Error('User not found');
+    // Use maybeSingle() via fetchUserProfile so a missing profile returns null
+    // instead of throwing a 406, then ensure one exists.
+    let data = await fetchUserProfile(user.id);
+    if (!data) {
+      data = await ensureUserProfile(user);
+    }
+    if (!data) throw new Error('User profile not found and could not be created');
 
     return {
       id: data.id,
       name: data.name,
       email: data.email,
       role: data.role.toLowerCase(),
-      permissions: (data.permissions as string[]) || [],
+      permissions: normalizePermissions(data.permissions),
     };
   },
 
