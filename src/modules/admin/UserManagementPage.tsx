@@ -33,6 +33,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { userService } from '@/services';
 import type { ModuleKey, User, UserRole, UserStatus } from '@/types';
 import { getInitials, formatDate } from '@/utils';
+import { isValidEmail } from '@/utils/validation';
 import { ShieldCheck, Plus, Edit, Ban, Trash2, Building2, Eye, FileCode, Plug, CreditCard, MessageSquare, FileText, Activity } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTemplateStore } from '@/store/templateStore';
@@ -90,8 +91,18 @@ export function UserManagementPage() {
   };
 
   const handleCreate = async () => {
+    // [DEBUG:email-validation] Point 1 — raw email value before frontend validation.
+    console.debug('[createUser] Point 1 — email before validation:', JSON.stringify(email));
+
     if (!name || !email || !password) {
       toast.error('Name, email, and password are required');
+      return;
+    }
+    const emailValid = isValidEmail(email);
+    // [DEBUG:email-validation] Frontend validation result for the entered email.
+    console.debug('[createUser] Point 1b — isValidEmail result:', emailValid, 'for', JSON.stringify(email));
+    if (!emailValid) {
+      toast.error('Please enter a valid email address');
       return;
     }
     if (password !== confirmPassword) {
@@ -102,16 +113,21 @@ export function UserManagementPage() {
       toast.error('Password must be at least 8 characters');
       return;
     }
+    const payload = {
+      name, email, password, role, status, companyName,
+      permissions: ROLE_PERMISSIONS[role],
+    };
+    // [DEBUG:email-validation] Point 2 — exact payload sent to the service layer.
+    console.debug('[createUser] Point 2 — payload before API request:', JSON.stringify(payload));
     try {
-      const newUser = await userService.create({
-        name, email, role, status, companyName,
-        permissions: ROLE_PERMISSIONS[role],
-      });
+      const newUser = await userService.create(payload);
       setUsers([...users, newUser]);
       setCreateOpen(false);
       resetForm();
       toast.success('User created successfully');
     } catch (error) {
+      // [DEBUG:email-validation] Full error stack from the backend/service layer.
+      console.error('[createUser] Point 5 — error caught in UI:', error instanceof Error ? error.stack : error);
       toast.error(error instanceof Error ? error.message : 'Failed to create user');
     }
   };

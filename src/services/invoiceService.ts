@@ -214,6 +214,22 @@ export const invoiceService = {
     const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
+    // Defensive guard: ensure items is always an array. If the caller passes
+    // undefined (e.g. due to a stale state closure), default to [] so the
+    // for...of loop below never throws a TypeError. We then validate that at
+    // least one item exists — this is the single source of truth for the
+    // "Please add at least one line item" rule.
+    //
+    // IMPORTANT: we do NOT filter by description. A line item is valid simply
+    // by existing in the array — the Review page renders every item (showing
+    // '—' for empty descriptions), so the service layer must accept the same
+    // collection. Filtering by description here caused a false "Please add at
+    // least one line item" error for items that had qty/rate but no text.
+    const safeItems = Array.isArray(input.items) ? input.items : [];
+    if (safeItems.length === 0) {
+      throw new Error('Please add at least one line item');
+    }
+
     // Calculate totals
     let subtotal = 0;
     let taxAmount = 0;
@@ -226,7 +242,7 @@ export const invoiceService = {
       amount: number;
     }> = [];
 
-    for (const item of input.items) {
+    for (const item of safeItems) {
       const qty = item.quantity || 1;
       const rate = item.rate || 0;
       const discount = item.discount || 0;

@@ -77,26 +77,47 @@ function transformCustomer(row: CustomerRow): Customer {
   };
 }
 
+const digitsOnly = (value: string) => value.replace(/\D/g, '');
+
+function assertExactDigits(value: string | undefined, digits: number, message: string, required = false) {
+  if (!value && !required) return;
+  if (!value || !new RegExp(`^\\d{${digits}}$`).test(value)) {
+    throw new Error(message);
+  }
+}
+
+function validateCustomerNumbers(customer: Partial<Customer> & { mobile?: string }, requireRequiredFields = false) {
+  const mobile = customer.mobile !== undefined ? digitsOnly(customer.mobile) : undefined;
+  const whatsapp = customer.whatsapp !== undefined ? digitsOnly(customer.whatsapp) : undefined;
+  const billingPincode = customer.billingAddress?.pincode !== undefined ? digitsOnly(customer.billingAddress.pincode) : undefined;
+  const shippingPincode = customer.shippingAddress?.pincode !== undefined ? digitsOnly(customer.shippingAddress.pincode) : undefined;
+
+  assertExactDigits(mobile, 10, 'Mobile number must be exactly 10 digits.', requireRequiredFields);
+  assertExactDigits(whatsapp, 10, 'WhatsApp number must be exactly 10 digits.', requireRequiredFields);
+  assertExactDigits(billingPincode, 6, 'Pincode must be exactly 6 digits.', requireRequiredFields || Boolean(customer.billingAddress));
+  assertExactDigits(shippingPincode, 6, 'Pincode must be exactly 6 digits.');
+}
+
 function toDbFormat(customer: Partial<Customer> & { name: string; businessName: string; email: string; mobile: string }) {
   return {
     name: customer.name,
     businessName: customer.businessName,
     gstNumber: customer.gstNumber || null,
     email: customer.email,
-    mobile: customer.mobile,
-    whatsapp: customer.whatsapp || null,
+    mobile: digitsOnly(customer.mobile),
+    whatsapp: customer.whatsapp ? digitsOnly(customer.whatsapp) : null,
     notes: customer.notes || null,
     billingLine1: customer.billingAddress?.line1 || '',
     billingLine2: customer.billingAddress?.line2 || null,
     billingCity: customer.billingAddress?.city || '',
     billingState: customer.billingAddress?.state || '',
-    billingPincode: customer.billingAddress?.pincode || '',
+    billingPincode: customer.billingAddress?.pincode ? digitsOnly(customer.billingAddress.pincode) : '',
     billingCountry: customer.billingAddress?.country || 'India',
     shippingLine1: customer.shippingAddress?.line1 || null,
     shippingLine2: customer.shippingAddress?.line2 || null,
     shippingCity: customer.shippingAddress?.city || null,
     shippingState: customer.shippingAddress?.state || null,
-    shippingPincode: customer.shippingAddress?.pincode || null,
+    shippingPincode: customer.shippingAddress?.pincode ? digitsOnly(customer.shippingAddress.pincode) : null,
     shippingCountry: customer.shippingAddress?.country || null,
   };
 }
@@ -108,15 +129,15 @@ function toDbUpdateFormat(customer: Partial<Customer>) {
   if (customer.businessName !== undefined) update.businessName = customer.businessName;
   if (customer.gstNumber !== undefined) update.gstNumber = customer.gstNumber || null;
   if (customer.email !== undefined) update.email = customer.email;
-  if (customer.mobile !== undefined) update.mobile = customer.mobile;
-  if (customer.whatsapp !== undefined) update.whatsapp = customer.whatsapp || null;
+  if (customer.mobile !== undefined) update.mobile = digitsOnly(customer.mobile);
+  if (customer.whatsapp !== undefined) update.whatsapp = customer.whatsapp ? digitsOnly(customer.whatsapp) : null;
   if (customer.notes !== undefined) update.notes = customer.notes || null;
   if (customer.billingAddress) {
     update.billingLine1 = customer.billingAddress.line1 || '';
     update.billingLine2 = customer.billingAddress.line2 || null;
     update.billingCity = customer.billingAddress.city || '';
     update.billingState = customer.billingAddress.state || '';
-    update.billingPincode = customer.billingAddress.pincode || '';
+    update.billingPincode = customer.billingAddress.pincode ? digitsOnly(customer.billingAddress.pincode) : '';
     update.billingCountry = customer.billingAddress.country || 'India';
   }
   if (customer.shippingAddress) {
@@ -124,7 +145,7 @@ function toDbUpdateFormat(customer: Partial<Customer>) {
     update.shippingLine2 = customer.shippingAddress.line2 || null;
     update.shippingCity = customer.shippingAddress.city || null;
     update.shippingState = customer.shippingAddress.state || null;
-    update.shippingPincode = customer.shippingAddress.pincode || null;
+    update.shippingPincode = customer.shippingAddress.pincode ? digitsOnly(customer.shippingAddress.pincode) : null;
     update.shippingCountry = customer.shippingAddress.country || null;
   }
 
@@ -183,6 +204,8 @@ export const customerService = {
   },
 
   async create(input: Omit<Customer, 'id' | 'createdAt' | 'updatedAt' | 'totalInvoices' | 'totalRevenue' | 'outstandingAmount'>): Promise<Customer> {
+    validateCustomerNumbers(input, true);
+
     const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 
@@ -211,6 +234,8 @@ export const customerService = {
   },
 
   async update(id: string, input: Partial<Customer>): Promise<Customer> {
+    validateCustomerNumbers(input);
+
     const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
 

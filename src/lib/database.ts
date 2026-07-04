@@ -133,6 +133,18 @@ export async function logActivity(
 }
 
 // Audit logger
+//
+// The `audit_logs` table schema (see migration 20260701110623) is:
+//   id(uuid), "companyId"(uuid NOT NULL), "userId"(uuid), action("AuditAction" NOT NULL),
+//   "entityType"(text NOT NULL), "entityId"(text), "oldValues"(jsonb),
+//   "newValues"(jsonb), "ipAddress"(text), "userAgent"(text), "createdAt"(timestamptz)
+//
+// The "AuditAction" enum is UPPERCASE: CREATE, UPDATE, DELETE, LOGIN, LOGOUT,
+// EXPORT, SETTINGS, VIEW. Callers pass lowercase values, so we uppercase here.
+//
+// IMPORTANT: audit logging is non-critical. A failure here MUST NOT prevent the
+// calling operation (e.g. user creation) from completing. The entire body is
+// wrapped in try/catch and errors are logged but never re-thrown.
 export async function logAudit(
   action: 'create' | 'update' | 'delete' | 'login' | 'logout' | 'export' | 'settings' | 'view',
   module: string,
@@ -148,27 +160,37 @@ export async function logAudit(
     const userId = await getCurrentUserId();
     const companyId = await getCurrentCompanyId();
 
-    const { data: userData } = await supabase
-      .from('users')
-      .select('name, role')
-      .eq('id', userId)
-      .maybeSingle();
-
-    await supabase.from('audit_logs').insert({
+    // Build the payload with ONLY columns that exist in the audit_logs table.
+    // Previously this sent 5 extra fields (userName, userRole, module,
+    // entityName, description) which caused PostgREST to return 400 Bad
+    // Request ("Could not find the '...' column"). The description/entityName
+    // are preserved inside newValues so the information is not lost.
+    const payload = {
       companyId,
       userId,
-      userName: userData?.name || 'Unknown',
-      userRole: userData?.role || 'STAFF',
-      action,
-      module,
-      entityType: module,
+      action: action.toUpperCase(), // AuditAction enum is uppercase
+      entityType: module,           // text NOT NULL
       entityId,
-      entityName,
-      description,
-      oldValues,
-      newValues,
-    });
+      oldValues: oldValues ?? null,
+      newValues: { ...newValues, entityName, description },
+    };
+
+    // Log the exact payload before the insert for debugging.
+    console.debug('[logAudit] inserting audit_logs payload:', JSON.stringify(payload));
+
+    const { error } = await supabase.from('audit_logs').insert(payload);
+
+    if (error) {
+      // Print the complete Supabase error object so the root cause is visible.
+      console.error('[logAudit] insert failed — full error:', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      });
+    }
   } catch (error) {
-    console.error('Failed to log audit:', error);
+    // Non-critical: log and continue. Never re-throw.
+    console.error('[logAudit] unexpected failure (non-blocking):', error);
   }
 }

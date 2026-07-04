@@ -122,6 +122,15 @@ export const settingsService = {
   async upsertBankInfo(input: Partial<BankInfo>): Promise<BankInfo> {
     const companyId = await getCurrentCompanyId();
 
+    const defaults: BankInfo = {
+      bankName: '',
+      accountName: '',
+      accountNumber: '',
+      ifsc: '',
+      branch: '',
+      upiId: '',
+    };
+
     // Check if bank info exists
     const { data: existing, error: existingError } = await supabase
       .from('bank_info')
@@ -135,12 +144,9 @@ export const settingsService = {
       const { data, error } = await supabase
         .from('bank_info')
         .update({
-          bankName: input.bankName,
-          accountName: input.accountName,
-          accountNumber: input.accountNumber,
-          ifsc: input.ifsc,
-          branch: input.branch || null,
-          upiId: input.upiId || null,
+          ...input,
+          branch: input.branch ?? existing.branch,
+          upiId: input.upiId ?? existing.upiId,
         })
         .eq('companyId', companyId)
         .select()
@@ -161,10 +167,8 @@ export const settingsService = {
       .from('bank_info')
       .insert({
         companyId,
-        bankName: input.bankName || '',
-        accountName: input.accountName || '',
-        accountNumber: input.accountNumber || '',
-        ifsc: input.ifsc || '',
+        ...defaults,
+        ...input,
         branch: input.branch || null,
         upiId: input.upiId || null,
       })
@@ -224,6 +228,17 @@ export const settingsService = {
 
     if (existingError) throw existingError;
 
+    const defaults: InvoiceSettings = {
+      prefix: 'INV',
+      nextNumber: 1001,
+      defaultTaxRate: 18,
+      defaultCurrency: 'INR',
+      defaultTerms: '',
+      defaultNotes: '',
+      autoNumbering: true,
+      paymentTerms: 30,
+    };
+
     const updateData: Record<string, any> = {};
     if (input.prefix !== undefined) updateData.prefix = input.prefix;
     if (input.nextNumber !== undefined) updateData.nextNumber = input.nextNumber;
@@ -260,6 +275,7 @@ export const settingsService = {
       .from('invoice_settings')
       .insert({
         companyId,
+        ...defaults,
         ...updateData,
       })
       .select()
@@ -310,6 +326,14 @@ export const settingsService = {
 
     if (existingError) throw existingError;
 
+    const defaults: CommunicationSettings = {
+      whatsappEnabled: false,
+      emailEnabled: true,
+      smsEnabled: false,
+      email: '',
+      whatsappNumber: '',
+    };
+
     const updateData: Record<string, any> = {};
     if (input.whatsappEnabled !== undefined) updateData.whatsappEnabled = input.whatsappEnabled;
     if (input.emailEnabled !== undefined) updateData.emailEnabled = input.emailEnabled;
@@ -340,6 +364,7 @@ export const settingsService = {
       .from('communication_settings')
       .insert({
         companyId,
+        ...defaults,
         ...updateData,
       })
       .select()
@@ -366,6 +391,39 @@ export const settingsService = {
       .maybeSingle();
 
     if (error || !data) return null;
+
+    return {
+      razorpay: {
+        status: data.razorpayEnabled ? 'connected' : 'disconnected',
+      },
+      paytm: {
+        status: data.paytmEnabled ? 'connected' : 'disconnected',
+      },
+    };
+  },
+
+  async updateGatewaySettings(input: Partial<GatewaySettings>): Promise<GatewaySettings> {
+    const companyId = await getCurrentCompanyId();
+
+    const updateData: Record<string, any> = {};
+    if (input.razorpay?.status !== undefined) updateData.razorpayEnabled = input.razorpay.status === 'connected';
+    if (input.paytm?.status !== undefined) updateData.paytmEnabled = input.paytm.status === 'connected';
+
+    const { data: existing, error: existingError } = await supabase
+      .from('gateway_settings')
+      .select('*')
+      .eq('companyId', companyId)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+
+    const query = existing
+      ? supabase.from('gateway_settings').update(updateData).eq('companyId', companyId)
+      : supabase.from('gateway_settings').insert({ companyId, ...updateData });
+
+    const { data, error } = await query.select().single();
+
+    if (error) throw error;
 
     return {
       razorpay: {

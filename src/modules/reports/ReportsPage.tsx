@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { StatCard } from '@/components/common/StatCard';
 import { ChartWrapper } from '@/components/common/ChartWrapper';
+import { ExportButton } from '@/components/common/ExportButton';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import {
   Select,
@@ -18,15 +19,15 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 import { formatCurrency, formatDate } from '@/utils';
-// import { ExportButton } from '@/components/common/ExportButton';
 import { reportsApi, dashboardApi } from '@/utils/api';
 import { invoiceService } from '@/services/invoiceService';
 import { customerService } from '@/services/customerService';
 import { paymentService } from '@/services/paymentService';
-import { BarChart3, Wallet, FileText, TrendingUp, Clock, AlertTriangle, Loader2, Download } from 'lucide-react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import type { Invoice, Customer, Payment } from '@/types';
+import { BarChart3, Wallet, FileText, TrendingUp, Clock, AlertTriangle, Loader2 } from 'lucide-react';
+import type { Invoice, Customer, Payment, CompanyInfo } from '@/types';
+import { useAuthStore } from '@/store/authStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import type { ReportConfig } from '@/utils/reportExport';
 
 const chartTooltipStyle = {
   backgroundColor: 'hsl(var(--card))',
@@ -36,9 +37,40 @@ const chartTooltipStyle = {
   color: 'hsl(var(--foreground))',
 };
 
+type ReportType = 'overview' | 'invoices' | 'customers' | 'payments' | 'tax';
+
+type ExportRow = Record<string, string | number>;
+
+const fallbackCompany: CompanyInfo = {
+  name: 'InvoiceGen',
+  legalName: 'InvoiceGen',
+  gstNumber: '',
+  panNumber: '',
+  email: '',
+  phone: '',
+  website: '',
+  address: {
+    line1: '',
+    city: '',
+    state: '',
+    pincode: '',
+    country: 'India',
+  },
+};
+
+const dateRangeLabels: Record<string, string> = {
+  '7d': 'Last 7 days',
+  '30d': 'Last 30 days',
+  '3m': 'Last 3 months',
+  '12m': 'Last 12 months',
+};
+
 export function ReportsPage() {
   const [dateRange, setDateRange] = useState('12m');
+  const [activeReport, setActiveReport] = useState<ReportType>('overview');
   const [isLoading, setIsLoading] = useState(true);
+  const { user } = useAuthStore();
+  const { company } = useSettingsStore();
 
   const [summary, setSummary] = useState({
     totalRevenue: 0,
@@ -88,17 +120,131 @@ export function ReportsPage() {
     loadReportData();
   }, [loadReportData]);
 
-  const dateRangeLabel = { '7d': 'Last 7 days', '30d': 'Last 30 days', '3m': 'Last 3 months', '12m': 'Last 12 months' }[dateRange] || 'All time';
+  const dateRangeLabel = dateRangeLabels[dateRange] || 'All time';
 
-  // Tax report data
-  const taxData = invoices.map((inv) => ({
-    Invoice: inv.number,
-    Customer: inv.customerName,
-    Subtotal: inv.subtotal,
-    Tax: inv.taxAmount,
-    Total: inv.total,
-    Date: formatDate(inv.issueDate),
-  }));
+  const taxData = useMemo(() => invoices.map((inv) => ({
+    id: inv.id,
+    invoice: inv.number,
+    customer: inv.customerName,
+    subtotal: inv.subtotal,
+    tax: inv.taxAmount,
+    total: inv.total,
+    date: formatDate(inv.issueDate),
+  })), [invoices]);
+
+  const summaryCards = useMemo(() => [
+    { label: 'Total Revenue', value: formatCurrency(summary.totalRevenue) },
+    { label: 'Paid Revenue', value: formatCurrency(summary.paidRevenue) },
+    { label: 'Outstanding', value: formatCurrency(summary.outstanding) },
+    { label: 'Overdue Amount', value: formatCurrency(summary.overdueAmount) },
+  ], [summary]);
+
+  const exportConfigs = useMemo<Record<ReportType, ReportConfig>>(() => {
+    const base = {
+      dateRange: dateRangeLabel,
+      userName: user?.name || 'Current user',
+      company: company || user?.companyInfo || fallbackCompany,
+      summaryCards,
+    };
+
+    return {
+      overview: {
+        ...base,
+        title: 'Overview Report',
+        columns: [
+          { key: 'label', label: 'Period' },
+          { key: 'revenue', label: 'Revenue' },
+          { key: 'created', label: 'Invoices Created' },
+          { key: 'paid', label: 'Invoices Paid' },
+        ],
+        rows: revenueTrend.map((point) => ({
+          label: String(point.label ?? ''),
+          revenue: formatCurrency(Number(point.value ?? 0)),
+          created: Number(point.created ?? 0),
+          paid: Number(point.paid ?? 0),
+        })),
+        chartData: revenueTrend.map((point) => ({ label: String(point.label ?? ''), value: Number(point.value ?? 0) })),
+      },
+      invoices: {
+        ...base,
+        title: 'Invoice Report',
+        columns: [
+          { key: 'number', label: 'Invoice #' },
+          { key: 'customer', label: 'Customer' },
+          { key: 'date', label: 'Date' },
+          { key: 'total', label: 'Total' },
+          { key: 'tax', label: 'Tax' },
+        ],
+        rows: invoices.map((invoice): ExportRow => ({
+          number: invoice.number,
+          customer: invoice.customerName,
+          date: formatDate(invoice.issueDate, 'short'),
+          total: formatCurrency(invoice.total),
+          tax: formatCurrency(invoice.taxAmount),
+        })),
+      },
+      customers: {
+        ...base,
+        title: 'Customer Revenue Report',
+        columns: [
+          { key: 'name', label: 'Customer' },
+          { key: 'business', label: 'Business' },
+          { key: 'invoices', label: 'Invoices' },
+          { key: 'revenue', label: 'Revenue' },
+          { key: 'outstanding', label: 'Outstanding' },
+        ],
+        rows: customers.map((customer): ExportRow => ({
+          name: customer.name,
+          business: customer.businessName,
+          invoices: customer.totalInvoices,
+          revenue: formatCurrency(customer.totalRevenue),
+          outstanding: formatCurrency(customer.outstandingAmount),
+        })),
+      },
+      payments: {
+        ...base,
+        title: 'Payment Report',
+        columns: [
+          { key: 'invoice', label: 'Invoice #' },
+          { key: 'customer', label: 'Customer' },
+          { key: 'date', label: 'Date' },
+          { key: 'amount', label: 'Amount' },
+          { key: 'method', label: 'Method' },
+          { key: 'status', label: 'Status' },
+        ],
+        rows: payments.map((payment): ExportRow => ({
+          invoice: payment.invoiceNumber,
+          customer: payment.customerName,
+          date: formatDate(payment.date, 'short'),
+          amount: formatCurrency(payment.amount),
+          method: payment.method,
+          status: payment.status,
+        })),
+      },
+      tax: {
+        ...base,
+        title: 'Tax Report (GST)',
+        columns: [
+          { key: 'invoice', label: 'Invoice' },
+          { key: 'customer', label: 'Customer' },
+          { key: 'subtotal', label: 'Subtotal' },
+          { key: 'tax', label: 'Tax' },
+          { key: 'total', label: 'Total' },
+          { key: 'date', label: 'Date' },
+        ],
+        rows: taxData.map((row): ExportRow => ({
+          invoice: row.invoice,
+          customer: row.customer,
+          subtotal: formatCurrency(row.subtotal),
+          tax: formatCurrency(row.tax),
+          total: formatCurrency(row.total),
+          date: row.date,
+        })),
+      },
+    };
+  }, [company, customers, dateRangeLabel, invoices, payments, revenueTrend, summaryCards, taxData, user]);
+
+  const activeExportConfig = exportConfigs[activeReport];
 
   const invoiceColumns: Column<Invoice>[] = [
     { key: 'number', header: 'Invoice #', cell: (r) => <span className="font-mono text-sm">{r.number}</span> },
@@ -152,9 +298,11 @@ export function ReportsPage() {
                 <SelectItem value="12m">Last 12 months</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.info('Export feature coming soon')}>
-                  <Download className="h-4 w-4" /> Export
-                </Button>
+            <ExportButton
+              reportTitle={activeExportConfig.title}
+              config={activeExportConfig}
+              disabled={activeExportConfig.rows.length === 0}
+            />
           </div>
         }
       />
@@ -168,7 +316,7 @@ export function ReportsPage() {
       </div>
 
       {/* Tabs for different report types */}
-      <Tabs defaultValue="overview" className="space-y-4">
+      <Tabs value={activeReport} onValueChange={(value) => setActiveReport(value as ReportType)} className="space-y-4">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="invoices">Invoices</TabsTrigger>
@@ -273,12 +421,12 @@ export function ReportsPage() {
                 <div className="divide-y">
                   {taxData.map((row, i) => (
                     <div key={i} className="grid grid-cols-6 gap-4 p-4 text-sm">
-                      <div className="font-mono">{row.Invoice}</div>
-                      <div>{row.Customer}</div>
-                      <div className="text-right">{formatCurrency(row.Subtotal)}</div>
-                      <div className="text-right">{formatCurrency(row.Tax)}</div>
-                      <div className="text-right font-semibold">{formatCurrency(row.Total)}</div>
-                      <div className="text-muted-foreground">{row.Date}</div>
+                      <div className="font-mono">{row.invoice}</div>
+                      <div>{row.customer}</div>
+                      <div className="text-right">{formatCurrency(row.subtotal)}</div>
+                      <div className="text-right">{formatCurrency(row.tax)}</div>
+                      <div className="text-right font-semibold">{formatCurrency(row.total)}</div>
+                      <div className="text-muted-foreground">{row.date}</div>
                     </div>
                   ))}
                 </div>
@@ -289,7 +437,7 @@ export function ReportsPage() {
                   <CardContent className="pt-4">
                     <div className="text-sm text-muted-foreground">Total Tax Collected</div>
                     <div className="text-2xl font-bold">
-                      {formatCurrency(taxData.reduce((s, r) => s + r.Tax, 0))}
+                      {formatCurrency(taxData.reduce((s, r) => s + r.tax, 0))}
                     </div>
                   </CardContent>
                 </Card>
@@ -297,7 +445,7 @@ export function ReportsPage() {
                   <CardContent className="pt-4">
                     <div className="text-sm text-muted-foreground">Taxable Value</div>
                     <div className="text-2xl font-bold">
-                      {formatCurrency(taxData.reduce((s, r) => s + r.Subtotal, 0))}
+                      {formatCurrency(taxData.reduce((s, r) => s + r.subtotal, 0))}
                     </div>
                   </CardContent>
                 </Card>

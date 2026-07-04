@@ -9,6 +9,39 @@ import type {
 } from '@/types';
 import { settingsApi } from '@/utils/api';
 
+const defaultBank: BankInfo = {
+  bankName: '',
+  accountName: '',
+  accountNumber: '',
+  ifsc: '',
+  branch: '',
+  upiId: '',
+};
+
+const defaultInvoice: InvoiceSettings = {
+  prefix: 'INV',
+  nextNumber: 1001,
+  defaultTaxRate: 18,
+  defaultCurrency: 'INR',
+  defaultTerms: '',
+  defaultNotes: '',
+  autoNumbering: true,
+  paymentTerms: 30,
+};
+
+const defaultCommunication: CommunicationSettings = {
+  whatsappEnabled: false,
+  emailEnabled: true,
+  smsEnabled: false,
+  email: '',
+  whatsappNumber: '',
+};
+
+const defaultGateways: GatewaySettings = {
+  razorpay: { status: 'disconnected' },
+  paytm: { status: 'disconnected' },
+};
+
 interface SettingsState {
   company: CompanyInfo | null;
   bank: BankInfo | null;
@@ -17,6 +50,7 @@ interface SettingsState {
   gateways: GatewaySettings | null;
   isLoading: boolean;
   isInitialized: boolean;
+  error: string | null;
   fetchSettings: () => Promise<void>;
   updateCompany: (data: Partial<CompanyInfo>) => Promise<void>;
   updateBank: (data: Partial<BankInfo>) => Promise<void>;
@@ -33,71 +67,27 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   gateways: null,
   isLoading: false,
   isInitialized: false,
+  error: null,
 
   fetchSettings: async () => {
-    set({ isLoading: true });
+    set({ isLoading: true, error: null });
     try {
       const settings = await settingsApi.getCompleteSettings();
 
-      const company: CompanyInfo | null = settings.company ? {
-        name: settings.company.name,
-        legalName: settings.company.legalName,
-        gstNumber: settings.company.gstNumber || '',
-        panNumber: settings.company.panNumber || '',
-        email: settings.company.email,
-        phone: settings.company.phone || '',
-        website: settings.company.website || '',
-        address: {
-          line1: settings.company.addressLine1,
-          line2: settings.company.addressLine2 || '',
-          city: settings.company.city,
-          state: settings.company.state,
-          pincode: settings.company.pincode,
-          country: settings.company.country,
-        },
-        logo: settings.company.logo || '',
-        signature: settings.company.signature || '',
-        primaryColor: settings.company.primaryColor || '',
-        footerText: settings.company.footerText || '',
-        showLogo: settings.company.showLogo ?? true,
-      } : null;
-
-      const bank: BankInfo | null = settings.bankInfo ? {
-        bankName: settings.bankInfo.bankName,
-        accountName: settings.bankInfo.accountName,
-        accountNumber: settings.bankInfo.accountNumber,
-        ifsc: settings.bankInfo.ifsc,
-        branch: settings.bankInfo.branch || '',
-        upiId: settings.bankInfo.upiId || '',
-      } : null;
-
-      const invoice: InvoiceSettings | null = settings.invoiceSettings ? {
-        prefix: settings.invoiceSettings.prefix,
-        nextNumber: settings.invoiceSettings.nextNumber,
-        defaultTaxRate: Number(settings.invoiceSettings.defaultTaxRate) || 18,
-        defaultCurrency: settings.invoiceSettings.defaultCurrency,
-        defaultTerms: settings.invoiceSettings.defaultTerms || '',
-        defaultNotes: settings.invoiceSettings.defaultNotes || '',
-        autoNumbering: settings.invoiceSettings.autoNumbering,
-        paymentTerms: settings.invoiceSettings.paymentTerms,
-      } : null;
-
-      const communication: CommunicationSettings | null = settings.communicationSettings ? {
-        whatsappEnabled: settings.communicationSettings.whatsappEnabled,
-        emailEnabled: settings.communicationSettings.emailEnabled,
-        smsEnabled: settings.communicationSettings.smsEnabled,
-        email: settings.communicationSettings.email || '',
-        whatsappNumber: settings.communicationSettings.whatsappNumber || '',
-      } : null;
-
-      const gateways: GatewaySettings | null = settings.gatewaySettings ? {
+      const company: CompanyInfo | null = settings.company ?? null;
+      const bank: BankInfo = { ...defaultBank, ...(settings.bankInfo ?? {}) };
+      const invoice: InvoiceSettings = { ...defaultInvoice, ...(settings.invoiceSettings ?? {}) };
+      const communication: CommunicationSettings = { ...defaultCommunication, ...(settings.communicationSettings ?? {}) };
+      const gateways: GatewaySettings = {
         razorpay: {
-          status: settings.gatewaySettings.razorpayStatus?.toLowerCase() as 'connected' | 'disconnected',
+          ...defaultGateways.razorpay,
+          ...(settings.gatewaySettings?.razorpay ?? {}),
         },
         paytm: {
-          status: settings.gatewaySettings.paytmStatus?.toLowerCase() as 'connected' | 'disconnected',
+          ...defaultGateways.paytm,
+          ...(settings.gatewaySettings?.paytm ?? {}),
         },
-      } : null;
+      };
 
       set({
         company,
@@ -107,63 +97,41 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         gateways,
         isLoading: false,
         isInitialized: true,
+        error: null,
       });
-    } catch {
-      set({ isLoading: false, isInitialized: true });
+    } catch (error) {
+      set({
+        isLoading: false,
+        isInitialized: true,
+        error: error instanceof Error ? error.message : 'Unable to load settings',
+      });
     }
   },
 
   updateCompany: async (data: Partial<CompanyInfo>) => {
-    const updateData = {
-      name: data.name,
-      legalName: data.legalName,
-      gstNumber: data.gstNumber,
-      panNumber: data.panNumber,
-      email: data.email,
-      phone: data.phone,
-      website: data.website,
-      addressLine1: data.address?.line1,
-      addressLine2: data.address?.line2,
-      city: data.address?.city,
-      state: data.address?.state,
-      pincode: data.address?.pincode,
-      country: data.address?.country,
-      logo: data.logo,
-      signature: data.signature,
-      primaryColor: data.primaryColor,
-      footerText: data.footerText,
-      showLogo: data.showLogo,
-    };
-    await settingsApi.updateCompanyProfile(updateData);
+    await settingsApi.updateCompanyProfile(data);
     set((state) => ({
       company: state.company ? { ...state.company, ...data } : null,
     }));
   },
 
   updateBank: async (data: Partial<BankInfo>) => {
-    await settingsApi.upsertBankInfo(data);
-    set((state) => ({
-      bank: state.bank ? { ...state.bank, ...data } : data as BankInfo,
-    }));
+    const bank = await settingsApi.upsertBankInfo(data);
+    set({ bank: { ...defaultBank, ...bank } });
   },
 
   updateInvoice: async (data: Partial<InvoiceSettings>) => {
-    await settingsApi.updateInvoiceSettings(data);
-    set((state) => ({
-      invoice: state.invoice ? { ...state.invoice, ...data } : null,
-    }));
+    const invoice = await settingsApi.updateInvoiceSettings(data);
+    set({ invoice: { ...defaultInvoice, ...invoice } });
   },
 
   updateCommunication: async (data: Partial<CommunicationSettings>) => {
-    await settingsApi.updateCommunicationSettings(data);
-    set((state) => ({
-      communication: state.communication ? { ...state.communication, ...data } : null,
-    }));
+    const communication = await settingsApi.updateCommunicationSettings(data);
+    set({ communication: { ...defaultCommunication, ...communication } });
   },
 
   updateGateways: async (data: Partial<GatewaySettings>) => {
-    set((state) => ({
-      gateways: state.gateways ? { ...state.gateways, ...data } : null,
-    }));
+    const gateways = await settingsApi.updateGatewaySettings(data);
+    set({ gateways });
   },
 }));
