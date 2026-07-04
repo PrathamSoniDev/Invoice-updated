@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { customerService } from '@/services/customerService';
 import { invoiceService } from '@/services/invoiceService';
+import { sendInvoiceEmail } from '@/services/emailService';
 import type { Customer, LineItem } from '@/types';
 import { formatCurrency, getInitials, generateId, formatDate } from '@/utils';
 import { FileText, Plus, Trash2, ChevronLeft, ChevronRight, Check, Search, Save, Send } from 'lucide-react';
@@ -40,6 +41,15 @@ export function InvoiceCreatePage() {
   useEffect(() => {
     customerService.list({ limit: 100 }).then((res) => setCustomers(res.data)).catch(() => setCustomers([]));
   }, []);
+
+  // TEMPORARY DEBUG: log the items rendered on the Review page so we can
+  // confirm the send handler validates the same collection. Remove after
+  // verifying the fix at runtime.
+  useEffect(() => {
+    if (step === 3) {
+      console.debug('[InvoiceCreatePage] Review page rendering items:', lineItems.length, lineItems);
+    }
+  }, [step, lineItems]);
 
   const filteredCustomers = customers.filter((c) =>
     c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
@@ -79,28 +89,100 @@ export function InvoiceCreatePage() {
       toast.error('Please select a customer');
       return;
     }
-    if (lineItems.every((item) => !item.description)) {
+
+    // Defensive: ensure lineItems is always an array. This guards against
+    // undefined/null state caused by async delays or stale closures so the
+    // validation never throws a TypeError before showing a clean message.
+    const safeItems = Array.isArray(lineItems) ? lineItems : [];
+
+    // SINGLE SOURCE OF TRUTH: validate the SAME collection that the Review
+    // page (Step 3) renders. The Review page maps over `lineItems` directly
+    // and shows every item — even ones with an empty description (rendered
+    // as '—'). Therefore a line item is "valid" simply by existing in the
+    // array. We must NOT filter by description, because that would remove
+    // items the user can see in the preview, causing a false
+    // "Please add at least one line item" error.
+    console.debug('[InvoiceCreatePage.handleSave] lineItems count:', safeItems.length);
+
+    if (safeItems.length === 0) {
       toast.error('Please add at least one line item');
       return;
     }
+
     setSaving(true);
-    await invoiceService.create({
-      customerId: selectedCustomer.id,
-      issueDate: new Date(issueDate).toISOString(),
-      dueDate: new Date(dueDate).toISOString(),
-      items: lineItems.map((item) => ({
-        description: item.description,
-        quantity: item.quantity,
-        rate: item.rate,
-        discount: item.discount || 0,
-        taxRate: item.taxRate || 0,
-      })),
-      notes,
-      terms,
-    });
-    setSaving(false);
-    toast.success(status === 'draft' ? 'Invoice saved as draft' : 'Invoice sent successfully');
-    navigate('/invoices');
+    try {
+      const payload = {
+        customerId: selectedCustomer.id,
+        issueDate: new Date(issueDate).toISOString(),
+        dueDate: new Date(dueDate).toISOString(),
+        // Send every item in the array — the same items the Review page
+        // displayed. Defensive fallback ensures a stable array is passed.
+        items: safeItems.map((item) => ({
+          description: item.description || '',
+          quantity: item.quantity,
+          rate: item.rate,
+          discount: item.discount || 0,
+          taxRate: item.taxRate || 0,
+        })),
+        notes,
+        terms,
+      };
+      // TEMPORARY DEBUG: confirm the final API payload contains the items.
+      // Remove after verifying the fix at runtime.
+      console.debug('[InvoiceCreatePage.handleSave] API payload items:', payload.items.length, payload.items);
+
+      // Step 1: Create the invoice in the database (always as DRAFT first).
+      const createdInvoice = await invoiceService.create(payload);
+
+      // Step 2: If the user clicked "Send Invoice", actually send the email
+      // via the backend Resend integration. We only mark the invoice as
+      // SENT after the email is confirmed delivered — this prevents the
+      // false "Invoice sent successfully" toast when no email was sent.
+      if (status === 'sent') {
+        try {
+          await sendInvoiceEmail({
+            customerEmail: selectedCustomer.email,
+            customerName: selectedCustomer.name,
+            invoice: {
+              number: createdInvoice.number,
+              lineItems: createdInvoice.lineItems.map((item) => ({
+                description: item.description,
+                quantity: item.quantity,
+                rate: item.rate,
+                amount: item.amount,
+              })),
+              subtotal: createdInvoice.subtotal,
+              taxAmount: createdInvoice.taxAmount,
+              total: createdInvoice.total,
+              dueDate: createdInvoice.dueDate,
+            },
+          });
+          // Email confirmed — now mark the invoice as SENT in the database.
+          await invoiceService.send(createdInvoice.id);
+          toast.success('Invoice sent successfully');
+        } catch (emailError) {
+          // Email failed — the invoice remains a DRAFT. Show the real error
+          // so the user knows the email was NOT sent.
+          console.error('[InvoiceCreatePage.handleSave] email send failed:', emailError);
+          toast.error(
+            emailError instanceof Error
+              ? `Email not sent: ${emailError.message}`
+              : 'Email not sent. The invoice was saved as a draft.',
+          );
+          // Still navigate so the user can see the saved draft and retry.
+          navigate('/invoices');
+          return;
+        }
+      } else {
+        toast.success('Invoice saved as draft');
+      }
+      navigate('/invoices');
+    } catch (error) {
+      console.error('[InvoiceCreatePage.handleSave] failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to save invoice');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (

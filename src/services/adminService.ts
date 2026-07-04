@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { getCurrentCompanyId, paginate, logAudit } from '@/lib/database';
 import type { User, ActivityLog, ModuleConfig } from '@/types';
 import { normalizeModuleKey, normalizePermissions, normalizeRoles, toDbModuleKey } from '@/utils/permissions';
+import { assertValidEmail, isValidEmail } from '@/utils/validation';
 
 function transformUser(row: any): User {
   return {
@@ -74,36 +75,112 @@ export const adminService = {
     return transformUser(data);
   },
 
-  async createUser(input: { name: string; email: string; role: string; phone?: string; status?: string; companyName?: string; permissions?: string[] }): Promise<User> {
+  async createUser(input: { name: string; email: string; password?: string; role: string; phone?: string; status?: string; companyName?: string; permissions?: string[] }): Promise<User> {
     const companyId = await getCurrentCompanyId();
 
-    // Generate a temporary password
-    const tempPassword = Math.random().toString(36).slice(-12) + 'Aa1!';
+    // [DEBUG:email-validation] Point 3 — raw email value as received by the
+    // service layer (before any validation/normalization). Reveals trailing
+    // whitespace, quotes, or encoding introduced by middleware.
+    console.debug('[adminService.createUser] Point 3 — raw input.email:', JSON.stringify(input.email));
 
-    // Create auth user
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: input.email,
-      password: tempPassword,
-      options: {
-        data: {
-          name: input.name,
-          companyId,
-        },
+    // Validate email format before reaching Supabase auth.signUp(), which
+    // otherwise surfaces a generic "Email address is invalid" error. This keeps
+    // backend validation consistent with the frontend form.
+    assertValidEmail(input.email);
+
+    // Normalize the email once so every downstream call (auth.signUp, the
+    // duplicate check and the profile insert) uses the exact same value. This
+    // prevents subtle mismatches caused by surrounding whitespace.
+    const normalizedEmail = input.email.trim();
+
+    // [DEBUG:email-validation] Point 4 — validation passed; show the normalized
+    // value that will be sent to Supabase auth.signUp().
+    console.debug('[adminService.createUser] Point 4 — normalizedEmail:', JSON.stringify(normalizedEmail), '| isValidEmail:', isValidEmail(normalizedEmail));
+
+    // Fail fast with a clear message when a user with this email already exists
+    // for the current company. The `users` table enforces
+    // `UNIQUE("companyId", email)`, but surfacing that constraint violation as a
+    // raw Postgres error ("duplicate key value violates unique constraint") is
+    // not user-friendly. Checking first also avoids creating an orphaned
+    // auth.users row when the profile insert would later fail.
+    const { data: existing } = await supabase
+      .from('users')
+      .select('id')
+      .eq('companyId', companyId)
+      .eq('email', normalizedEmail)
+      .is('deletedAt', null)
+      .maybeSingle();
+
+    if (existing) {
+      throw new Error('Email already exists');
+    }
+
+    // Create the auth user via a secure Supabase Edge Function.
+    //
+    // We intentionally do NOT call `supabase.auth.signUp()` here. That endpoint
+    // is rate-limited per-IP/email and sends a confirmation email, which causes
+    // `429 email rate limit exceeded` errors when an admin creates several
+    // users in quick succession.
+    //
+    // The Edge Function (`supabase/functions/admin-create-user`) uses the
+    // Supabase Admin API (`auth.admin.createUser`) with the service role key,
+    // which bypasses the rate limit and sets `email_confirm: true` so the new
+    // user can sign in immediately. The service role key never reaches the
+    // browser.
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+
+    if (!accessToken) {
+      throw new Error('You must be signed in to create a user');
+    }
+
+    const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-create-user`;
+
+    // [DEBUG:email-validation] Point 4b — payload sent to the Edge Function.
+    const edgePayload = {
+      email: normalizedEmail,
+      password: input.password,
+      name: input.name,
+      companyId,
+    };
+    console.debug('[adminService.createUser] Point 4b — Edge Function payload:', JSON.stringify({ email: edgePayload.email, name: edgePayload.name, companyId: edgePayload.companyId }));
+
+    const edgeResponse = await fetch(functionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
       },
+      body: JSON.stringify(edgePayload),
     });
 
-    if (authError) throw authError;
-    if (!authData.user) throw new Error('Failed to create user');
+    const edgeResult = await edgeResponse.json();
+
+    // [DEBUG:email-validation] Point 4c — Edge Function response.
+    console.debug('[adminService.createUser] Point 4c — Edge Function result:', edgeResponse.ok ? { userId: edgeResult.userId } : { status: edgeResponse.status, error: edgeResult.error });
+
+    if (!edgeResponse.ok) {
+      // The Edge Function returns Supabase's error message directly. If the
+      // email is a genuine duplicate, GoTrue's message is surfaced here.
+      if (/already.*registered|already.*exists|user.*already/i.test(edgeResult.error || '')) {
+        throw new Error('User already exists. Please reuse or reset password.');
+      }
+      throw new Error(edgeResult.error || 'Failed to create auth user');
+    }
+
+    const authUserId = edgeResult.userId as string;
+    if (!authUserId) throw new Error('Failed to create user');
 
     // Create the user profile (maybeSingle handles the insert-returning-one-row
     // case without throwing 406 if zero rows are returned)
     const { data, error } = await supabase
       .from('users')
       .insert({
-        id: authData.user.id,
+        id: authUserId,
         companyId,
         name: input.name,
-        email: input.email,
+        email: normalizedEmail,
         role: input.role.toUpperCase(),
         status: input.status ? input.status.toUpperCase() : 'INVITED',
         phone: input.phone || null,
@@ -112,7 +189,15 @@ export const adminService = {
       .select('*, companies!users_companyId_fkey(id, name)')
       .maybeSingle();
 
-    if (error) throw error;
+    if (error) {
+      // Race-condition safety net: if a concurrent request inserted the same
+      // email between our pre-check and this insert, the UNIQUE(companyId,email)
+      // constraint fires. Surface it with the same friendly message.
+      if (/duplicate key|unique constraint|users_companyId_email_key/i.test(error.message)) {
+        throw new Error('Email already exists');
+      }
+      throw error;
+    }
     if (!data) throw new Error('Failed to create user profile');
 
     await logAudit('create', 'users', data.id, input.name, `Created user ${input.name}`);
@@ -172,20 +257,53 @@ export const adminService = {
   },
 
   async deleteUser(id: string): Promise<void> {
+    // Fetch the user profile first (we need the name/email for the audit log
+    // and to pass to the Edge Function).
     const { data: user, error: fetchError } = await supabase
       .from('users')
-      .select('name')
+      .select('name, email')
       .eq('id', id)
       .maybeSingle();
 
     if (fetchError) throw fetchError;
 
-    const { error } = await supabase
-      .from('users')
-      .update({ deletedAt: new Date().toISOString() })
-      .eq('id', id);
+    // ---- Single API call to the delete-user Edge Function -------------------
+    // The Edge Function (supabase/functions/delete-user) handles EVERYTHING
+    // server-side using the service role key:
+    //   1. Deletes the auth.users row (auth.admin.deleteUser)
+    //   2. Nullifies FK references in no-cascade tables
+    //   3. Hard-deletes the public.users row (frees the email constraint)
+    //
+    // The browser NEVER touches the service role key. No manual Supabase
+    // dashboard deletion is required.
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
 
-    if (error) throw error;
+    if (!accessToken) {
+      throw new Error('You must be signed in to delete a user');
+    }
+
+    const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-user`;
+
+    console.debug('[adminService.deleteUser] calling delete-user Edge Function for:', id);
+
+    const edgeResponse = await fetch(functionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ userId: id, email: user?.email }),
+    });
+
+    const edgeResult = await edgeResponse.json();
+
+    console.debug('[adminService.deleteUser] Edge Function result:', edgeResponse.ok ? edgeResult : { status: edgeResponse.status, error: edgeResult.error });
+
+    if (!edgeResponse.ok) {
+      throw new Error(edgeResult.error || 'Failed to delete user');
+    }
 
     await logAudit('delete', 'users', id, user?.name || 'Unknown', `Deleted user`);
   },

@@ -8,34 +8,67 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FileUpload } from '@/components/common/FileUpload';
+import { EmptyState } from '@/components/common/EmptyState';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useSettingsStore } from '@/store/settingsStore';
-import { Settings, Building2, Banknote, FileText, MessageSquare, CreditCard, Save, Check, Zap, Wallet, Plug, Loader2 } from 'lucide-react';
+import { Settings, Building2, Banknote, FileText, MessageSquare, CreditCard, Save, Check, Zap, Wallet, Plug, Loader2, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 
 export function SettingsPage() {
   const navigate = useNavigate();
-  const { company, bank, invoice, communication, gateways, updateCompany, updateBank, updateInvoice, updateCommunication, updateGateways, fetchSettings, isLoading } = useSettingsStore();
+  const {
+    company,
+    bank,
+    invoice,
+    communication,
+    gateways,
+    updateCompany,
+    updateBank,
+    updateInvoice,
+    updateCommunication,
+    updateGateways,
+    fetchSettings,
+    isLoading,
+    isInitialized,
+    error,
+  } = useSettingsStore();
   const [activeTab, setActiveTab] = useState('company');
 
   useEffect(() => {
-    if (!company && !isLoading) {
+    if (!isInitialized && !isLoading) {
       fetchSettings();
     }
-  }, [company, fetchSettings, isLoading]);
+  }, [fetchSettings, isInitialized, isLoading]);
 
   const handleSave = (section: string) => toast.success(`${section} settings saved`);
 
-  const handleGatewayToggle = (gw: 'razorpay' | 'paytm') => {
+  const renderSectionEmpty = (section: string) => (
+    <Card className="shadow-soft max-w-3xl">
+      <EmptyState
+        icon={AlertCircle}
+        title={`${section} settings unavailable`}
+        description="No settings record was returned. You can retry loading or start editing to create the default settings record."
+        action={<Button variant="outline" onClick={() => fetchSettings()}>Retry</Button>}
+      />
+    </Card>
+  );
+
+  const handleGatewayToggle = async (gw: 'razorpay' | 'paytm') => {
     if (!gateways) return;
     const current = gateways[gw].status;
     const newStatus = current === 'connected' ? 'disconnected' : 'connected';
-    updateGateways({ [gw]: { status: newStatus } } as never);
-    toast.success(`${gw === 'razorpay' ? 'Razorpay' : 'Paytm Business'} ${newStatus === 'connected' ? 'connected' : 'disconnected'}`);
+
+    try {
+      await updateGateways({ [gw]: { status: newStatus } } as Partial<typeof gateways>);
+      toast.success(`${gw === 'razorpay' ? 'Razorpay' : 'Paytm Business'} ${newStatus === 'connected' ? 'connected' : 'disconnected'}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Unable to update gateway settings');
+    }
   };
 
-  if (isLoading || (!company && !bank && !invoice)) {
+  if (isLoading && !isInitialized) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -50,6 +83,14 @@ export function SettingsPage() {
         description="Manage your company profile, billing, and preferences"
         icon={Settings}
       />
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Unable to load settings</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 h-auto">
@@ -205,6 +246,7 @@ export function SettingsPage() {
             </CardContent>
           </Card>
           )}
+          {!bank && renderSectionEmpty('Bank')}
         </TabsContent>
 
         {/* Invoice Settings */}
@@ -254,6 +296,7 @@ export function SettingsPage() {
             </CardContent>
           </Card>
           )}
+          {!invoice && renderSectionEmpty('Invoice')}
         </TabsContent>
 
         {/* Communication Settings */}
@@ -292,6 +335,7 @@ export function SettingsPage() {
             </CardContent>
           </Card>
           )}
+          {!communication && renderSectionEmpty('Communication')}
         </TabsContent>
 
         {/* Payment Gateway Settings */}
@@ -364,6 +408,7 @@ export function SettingsPage() {
             </div>
           </div>
           )}
+          {!gateways && renderSectionEmpty('Payment gateway')}
         </TabsContent>
       </Tabs>
     </div>

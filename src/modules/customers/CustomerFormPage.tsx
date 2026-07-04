@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { useForm, type UseFormRegisterReturn } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -13,22 +13,27 @@ import { customerService } from '@/services/customerService';
 import { Users, Save } from 'lucide-react';
 import { toast } from 'sonner';
 
+const digitsOnly = (value: string) => value.replace(/\D/g, '');
+
+const optionalExactDigits = (digits: number, message: string) =>
+  z.string().optional().refine((value) => !value || new RegExp(`^\\d{${digits}}$`).test(value), message);
+
 const schema = z.object({
   name: z.string().min(2, 'Name is required'),
   businessName: z.string().min(2, 'Business name is required'),
   gstNumber: z.string().optional(),
   email: z.string().email('Valid email is required'),
-  mobile: z.string().min(10, 'Valid mobile number is required'),
-  whatsapp: z.string().optional(),
+  mobile: z.string().regex(/^\d{10}$/, 'Mobile number must be exactly 10 digits.'),
+  whatsapp: z.string().regex(/^\d{10}$/, 'WhatsApp number must be exactly 10 digits.'),
   billingLine1: z.string().min(5, 'Address is required'),
   billingLine2: z.string().optional(),
   billingCity: z.string().min(2, 'City is required'),
   billingState: z.string().min(2, 'State is required'),
-  billingPincode: z.string().min(6, 'Pincode is required'),
+  billingPincode: z.string().regex(/^\d{6}$/, 'Pincode must be exactly 6 digits.'),
   shippingLine1: z.string().optional(),
   shippingCity: z.string().optional(),
   shippingState: z.string().optional(),
-  shippingPincode: z.string().optional(),
+  shippingPincode: optionalExactDigits(6, 'Pincode must be exactly 6 digits.'),
   notes: z.string().optional(),
 });
 
@@ -44,6 +49,34 @@ export function CustomerFormPage() {
 
   const { register, handleSubmit, formState: { errors }, setValue } = useForm<FormData>({
     resolver: zodResolver(schema),
+  });
+  const mobileRegister = register('mobile', { setValueAs: digitsOnly });
+  const whatsappRegister = register('whatsapp', { setValueAs: digitsOnly });
+  const billingPincodeRegister = register('billingPincode', { setValueAs: digitsOnly });
+  const shippingPincodeRegister = register('shippingPincode', { setValueAs: digitsOnly });
+
+  const numericInputProps = (field: UseFormRegisterReturn, maxLength: number) => ({
+    ...field,
+    inputMode: 'numeric' as const,
+    maxLength,
+    onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
+      if (e.key.length === 1 && !/^\d$/.test(e.key)) {
+        e.preventDefault();
+      }
+    },
+    onPaste: (e: ClipboardEvent<HTMLInputElement>) => {
+      const pastedValue = e.clipboardData.getData('text');
+      const selectedLength = e.currentTarget.selectionEnd! - e.currentTarget.selectionStart!;
+      const nextLength = e.currentTarget.value.length - selectedLength + pastedValue.length;
+
+      if (!/^\d+$/.test(pastedValue) || nextLength > maxLength) {
+        e.preventDefault();
+      }
+    },
+    onChange: (e: ChangeEvent<HTMLInputElement>) => {
+      e.currentTarget.value = digitsOnly(e.currentTarget.value).slice(0, maxLength);
+      field.onChange(e);
+    },
   });
 
   useEffect(() => {
@@ -157,12 +190,13 @@ export function CustomerFormPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="mobile">Mobile *</Label>
-              <Input id="mobile" placeholder="+91 9876543210" {...register('mobile')} />
+              <Input id="mobile" placeholder="9876543210" {...numericInputProps(mobileRegister, 10)} />
               {errors.mobile && <p className="text-xs text-destructive">{errors.mobile.message}</p>}
             </div>
             <div className="space-y-2">
               <Label htmlFor="whatsapp">WhatsApp</Label>
-              <Input id="whatsapp" placeholder="+91 9876543210" {...register('whatsapp')} />
+              <Input id="whatsapp" placeholder="9876543210" {...numericInputProps(whatsappRegister, 10)} />
+              {errors.whatsapp && <p className="text-xs text-destructive">{errors.whatsapp.message}</p>}
             </div>
           </CardContent>
         </Card>
@@ -194,7 +228,7 @@ export function CustomerFormPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="billingPincode">Pincode *</Label>
-              <Input id="billingPincode" placeholder="400001" {...register('billingPincode')} />
+              <Input id="billingPincode" placeholder="400001" {...numericInputProps(billingPincodeRegister, 6)} />
               {errors.billingPincode && <p className="text-xs text-destructive">{errors.billingPincode.message}</p>}
             </div>
           </CardContent>
@@ -231,7 +265,8 @@ export function CustomerFormPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="shippingPincode">Pincode</Label>
-              <Input id="shippingPincode" placeholder="400001" disabled={sameAddress} {...register('shippingPincode')} />
+              <Input id="shippingPincode" placeholder="400001" disabled={sameAddress} {...numericInputProps(shippingPincodeRegister, 6)} />
+              {errors.shippingPincode && <p className="text-xs text-destructive">{errors.shippingPincode.message}</p>}
             </div>
           </CardContent>
         </Card>

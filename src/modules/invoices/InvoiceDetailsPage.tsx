@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { InvoiceStatusBadge } from '@/components/common/StatusBadge';
 import { invoiceService } from '@/services/invoiceService';
+import { sendInvoiceEmail } from '@/services/emailService';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useModuleStore } from '@/store/moduleStore';
 import type { Invoice } from '@/types';
@@ -18,6 +19,7 @@ export function InvoiceDetailsPage() {
   const navigate = useNavigate();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sendingEmail, setSendingEmail] = useState(false);
   const { company } = useSettingsStore();
   const { isModuleEnabled } = useModuleStore();
 
@@ -30,6 +32,45 @@ export function InvoiceDetailsPage() {
       setLoading(false);
     });
   }, [id]);
+
+  // Sends the invoice email via the backend Resend integration, then marks
+  // the invoice as SENT in the database only after the email is confirmed.
+  const handleSendEmail = async () => {
+    if (!invoice) return;
+    setSendingEmail(true);
+    try {
+      await sendInvoiceEmail({
+        customerEmail: invoice.customerEmail,
+        customerName: invoice.customerName,
+        invoice: {
+          number: invoice.number,
+          lineItems: invoice.lineItems.map((item) => ({
+            description: item.description,
+            quantity: item.quantity,
+            rate: item.rate,
+            amount: item.amount,
+          })),
+          subtotal: invoice.subtotal,
+          taxAmount: invoice.taxAmount,
+          total: invoice.total,
+          dueDate: invoice.dueDate,
+        },
+      });
+      // Email confirmed — mark as SENT in the database.
+      const updated = await invoiceService.send(invoice.id);
+      setInvoice(updated);
+      toast.success('Invoice sent via email');
+    } catch (error) {
+      console.error('[InvoiceDetailsPage] email send failed:', error);
+      toast.error(
+        error instanceof Error
+          ? `Email not sent: ${error.message}`
+          : 'Failed to send invoice email',
+      );
+    } finally {
+      setSendingEmail(false);
+    }
+  };
 
   if (loading) return <div className="py-16 text-center text-muted-foreground">Loading invoice...</div>;
   if (!invoice) return <div className="py-16 text-center text-muted-foreground">Invoice not found</div>;
@@ -69,8 +110,8 @@ export function InvoiceDetailsPage() {
             <Copy className="h-4 w-4" /> Copy Link
           </Button>
           {emailEnabled && (
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.success('Invoice sent via email')}>
-              <Mail className="h-4 w-4" /> Email
+            <Button variant="outline" size="sm" className="gap-2" onClick={handleSendEmail} disabled={sendingEmail}>
+              <Mail className="h-4 w-4" /> {sendingEmail ? 'Sending...' : 'Email'}
             </Button>
           )}
           {whatsappEnabled && (
