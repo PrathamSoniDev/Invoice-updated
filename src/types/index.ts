@@ -404,3 +404,27 @@ export interface SyncHistory {
   startedAt: string;
   completedAt?: string;
 }
+
+
+// ========== NOTIFICATIONS ==========
+
+export type NotificationType =
+  | "payment_received"
+  | "invoice_paid"
+  | "invoice_overdue"
+  | "customer_created"
+  | "payment_failed"
+  | "settings_updated";
+
+export interface Notification {
+  id: ID;
+  companyId: ID;
+  userId?: ID;
+  type: NotificationType;
+  title: string;
+  message: string;
+  isRead: boolean;
+  readAt?: string;
+  createdAt: string;
+  data?: Record<string, unknown>;
+}

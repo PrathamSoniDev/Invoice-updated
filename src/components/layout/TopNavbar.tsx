@@ -4,6 +4,13 @@ import { useUIStore } from '@/store/uiStore';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+
+import { useEffect, useState } from "react";
+import { notificationService } from "@/services/notificationService";
+import type { Notification } from "@/types";
+import { formatDate } from "@/utils";
+import { toast } from "sonner";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,10 +30,51 @@ export function TopNavbar() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
 
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  useEffect(() => {
+    loadNotifications();
+  }, []);
+
+  async function loadNotifications() {
+    try {
+      const data = await notificationService.getLatest(3);
+      setNotifications(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleRead(id: string) {
+    try {
+      await notificationService.markAsRead(id);
+
+      setNotifications((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                isRead: true,
+                readAt: new Date().toISOString(),
+              }
+            : item
+        )
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update notification");
+    }
+  }
+
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b bg-background/80 backdrop-blur-md px-4 lg:px-6">
       {/* Mobile menu */}
-      <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileSidebar(true)}>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="lg:hidden"
+        onClick={() => setMobileSidebar(true)}
+      >
         <Menu className="h-5 w-5" />
       </Button>
 
@@ -45,8 +93,17 @@ export function TopNavbar() {
 
       <div className="flex items-center gap-1 sm:gap-2 ml-auto">
         {/* Theme toggle */}
-        <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-9 w-9">
-          {theme === 'light' ? <Moon className="h-[18px] w-[18px]" /> : <Sun className="h-[18px] w-[18px]" />}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={toggleTheme}
+          className="h-9 w-9"
+        >
+          {theme === "light" ? (
+            <Moon className="h-[18px] w-[18px]" />
+          ) : (
+            <Sun className="h-[18px] w-[18px]" />
+          )}
         </Button>
 
         {/* Notifications */}
@@ -54,30 +111,54 @@ export function TopNavbar() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="relative h-9 w-9">
               <Bell className="h-[18px] w-[18px]" />
-              <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive ring-2 ring-background" />
+              {notifications.some((n) => !n.isRead) && (
+                <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive ring-2 ring-background" />
+              )}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-80">
             <DropdownMenuLabel className="flex items-center justify-between">
               <span>Notifications</span>
-              <Badge variant="secondary" className="text-xs">3 new</Badge>
+              <Badge variant="secondary" className="text-xs">
+                {notifications.filter((n) => !n.isRead).length} new
+              </Badge>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {[
-              { title: 'Payment Received', desc: 'Invoice INV-2025-1005 was paid', time: '2m ago' },
-              { title: 'Invoice Overdue', desc: 'Invoice INV-2025-1002 is overdue', time: '1h ago' },
-              { title: 'New Customer', desc: 'TechFlow Solutions was added', time: '3h ago' },
-            ].map((notif, i) => (
-              <DropdownMenuItem key={i} className="flex flex-col items-start gap-1 py-2.5">
+            {notifications.map((notif) => (
+              <DropdownMenuItem
+                key={notif.id}
+                className="flex flex-col items-start gap-1 py-2.5"
+                onClick={() => handleRead(notif.id)}
+              >
                 <div className="flex w-full items-center justify-between">
-                  <span className="text-sm font-medium">{notif.title}</span>
-                  <span className="text-xs text-muted-foreground">{notif.time}</span>
+                  <span
+                    className={`text-sm ${
+                      !notif.isRead ? "font-semibold" : "font-medium"
+                    }`}
+                  >
+                    {notif.title}
+                  </span>
+
+                  <span className="text-xs text-muted-foreground">
+                    {formatDate(notif.createdAt, "short")}
+                  </span>
                 </div>
-                <span className="text-xs text-muted-foreground">{notif.desc}</span>
+
+                <span className="text-xs text-muted-foreground">
+                  {notif.message}
+                </span>
               </DropdownMenuItem>
             ))}
+            {notifications.length === 0 && (
+              <div className="py-6 text-center text-sm text-muted-foreground">
+                No notifications found
+              </div>
+            )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="justify-center text-sm text-primary">
+            <DropdownMenuItem
+              className="justify-center text-sm text-primary"
+              onClick={() => navigate("/notifications")}
+            >
               View all notifications
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -89,12 +170,16 @@ export function TopNavbar() {
             <button className="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-muted transition-colors">
               <Avatar className="h-8 w-8 border">
                 <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                  {user ? getInitials(user.name) : 'U'}
+                  {user ? getInitials(user.name) : "U"}
                 </AvatarFallback>
               </Avatar>
               <div className="hidden sm:flex flex-col items-start">
-                <span className="text-sm font-medium leading-none">{user?.name || 'User'}</span>
-                <span className="text-xs text-muted-foreground capitalize">{user?.role || 'admin'}</span>
+                <span className="text-sm font-medium leading-none">
+                  {user?.name || "User"}
+                </span>
+                <span className="text-xs text-muted-foreground capitalize">
+                  {user?.role || "admin"}
+                </span>
               </div>
               <ChevronDown className="h-4 w-4 text-muted-foreground hidden sm:block" />
             </button>
@@ -103,21 +188,29 @@ export function TopNavbar() {
             <DropdownMenuLabel>
               <div className="flex flex-col gap-0.5">
                 <span className="font-medium">{user?.name}</span>
-                <span className="text-xs text-muted-foreground font-normal">{user?.email}</span>
+                <span className="text-xs text-muted-foreground font-normal">
+                  {user?.email}
+                </span>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => navigate('/settings')} className="gap-2 cursor-pointer">
+            <DropdownMenuItem
+              onClick={() => navigate("/settings")}
+              className="gap-2 cursor-pointer"
+            >
               <User className="h-4 w-4" /> Profile
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate('/settings')} className="gap-2 cursor-pointer">
+            <DropdownMenuItem
+              onClick={() => navigate("/settings")}
+              className="gap-2 cursor-pointer"
+            >
               <Settings className="h-4 w-4" /> Settings
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => {
                 logout();
-                navigate('/login');
+                navigate("/login");
               }}
               className="gap-2 cursor-pointer text-destructive focus:text-destructive"
             >
