@@ -6,7 +6,6 @@ import type {
   InvoiceSettings,
   CommunicationSettings,
   GatewaySettings,
-  GatewayCredentialsUpdate,
 } from '@/types';
 import { settingsApi } from '@/utils/api';
 
@@ -39,8 +38,8 @@ const defaultCommunication: CommunicationSettings = {
 };
 
 const defaultGateways: GatewaySettings = {
-  razorpay: { status: 'disconnected', keyId: '', keySecretPreview: null, webhookSecret: '', upiId: '' },
-  paytm: { status: 'disconnected', merchantId: '', merchantKeyPreview: null, environment: 'TEST', upiId: '' },
+  razorpay: { status: 'disconnected' },
+  paytm: { status: 'disconnected' },
 };
 
 interface SettingsState {
@@ -57,7 +56,7 @@ interface SettingsState {
   updateBank: (data: Partial<BankInfo>) => Promise<void>;
   updateInvoice: (data: Partial<InvoiceSettings>) => Promise<void>;
   updateCommunication: (data: Partial<CommunicationSettings>) => Promise<void>;
-  updateGateways: (data: GatewayCredentialsUpdate) => Promise<void>;
+  updateGateways: (data: Partial<GatewaySettings>) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -131,7 +130,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     set({ communication: { ...defaultCommunication, ...communication } });
   },
 
-  updateGateways: async (data: GatewayCredentialsUpdate) => {
+  updateGateways: async (data: Partial<GatewaySettings>) => {
     const gateways = await settingsApi.updateGatewaySettings(data);
     set({ gateways });
   },

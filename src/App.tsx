@@ -32,8 +32,7 @@ const ModuleManagementPage = lazy(() => import('@/modules/admin/ModuleManagement
 const AuditLogsPage = lazy(() => import('@/modules/admin/AuditLogsPage').then((m) => ({ default: m.AuditLogsPage })));
 const UsageAnalyticsPage = lazy(() => import('@/modules/admin/UsageAnalyticsPage').then((m) => ({ default: m.UsageAnalyticsPage })));
 const InvoiceTemplatesPage = lazy(() => import('@/modules/admin/InvoiceTemplatesPage').then((m) => ({ default: m.InvoiceTemplatesPage })));
-// const ExternalIntegrationsPage = lazy(() => import('@/modules/settings/ExternalIntegrationsPage').then((m) => ({ default: m.ExternalIntegrationsPage })));
-const MasterConsolePage = lazy(() => import('@/modules/master/MasterConsolePage').then((m) => ({ default: m.MasterConsolePage })));
+const ExternalIntegrationsPage = lazy(() => import('@/modules/settings/ExternalIntegrationsPage').then((m) => ({ default: m.ExternalIntegrationsPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -96,7 +95,7 @@ export default function App() {
 
               {/* Settings */}
               <Route path="/settings" element={<ProtectedRoute module="settings"><SettingsPage /></ProtectedRoute>} />
-              {/* <Route path="/settings/external-integrations" element={<ProtectedRoute module="settings"><ExternalIntegrationsPage /></ProtectedRoute>} /> */}
+              <Route path="/settings/external-integrations" element={<ProtectedRoute module="settings"><ExternalIntegrationsPage /></ProtectedRoute>} />
 
               {/* Admin */}
               <Route path="/admin/users" element={<ProtectedRoute module="admin" adminOnly><UserManagementPage /></ProtectedRoute>} />
@@ -104,9 +103,6 @@ export default function App() {
               <Route path="/admin/invoice-templates" element={<ProtectedRoute module="admin" adminOnly><InvoiceTemplatesPage /></ProtectedRoute>} />
               <Route path="/admin/audit-logs" element={<ProtectedRoute module="admin" adminOnly><AuditLogsPage /></ProtectedRoute>} />
               <Route path="/admin/usage" element={<ProtectedRoute module="admin" adminOnly><UsageAnalyticsPage /></ProtectedRoute>} />
-
-              {/* Platform (SUPER_ADMIN only — enforced inside the page via RLS-backed queries) */}
-              <Route path="/master" element={<ProtectedRoute><MasterConsolePage /></ProtectedRoute>} />
             </Route>
 
             {/* Redirects */}

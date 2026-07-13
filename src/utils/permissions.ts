@@ -34,8 +34,6 @@ const USER_ROLE_ALIASES: Record<string, UserRole> = {
   manager: 'manager',
   staff: 'staff',
   viewer: 'viewer',
-  super_admin: 'super_admin',
-  superadmin: 'super_admin',
 };
 
 function normalizeToken(value: unknown): string {

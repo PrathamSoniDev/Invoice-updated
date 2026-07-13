@@ -15,14 +15,12 @@ DECLARE
   pl_status TEXT;
   c_idx INTEGER;
 BEGIN
-  IF EXISTS (SELECT 1 FROM payments LIMIT 1) THEN
-    RAISE NOTICE 'Demo payments already seeded — skipping.';
-    RETURN;
-  END IF;
-
   c_idx := 0;
   
-    
+  -- ============================================
+  -- PAYMENTS (From paid invoices)
+  -- ============================================
+  
   INSERT INTO payments (id, "companyId", "invoiceId", "customerId", amount, method, status, gateway, "transactionId", date)
   SELECT
     gen_random_uuid(),
@@ -47,7 +45,10 @@ BEGIN
   FROM invoices i
   WHERE i.status = 'PAID' AND i."paidAt" IS NOT NULL;
   
-   
+  -- ============================================
+  -- PAYMENT LINKS (20 per company)
+  -- ============================================
+  
   FOR c_rec IN SELECT id FROM companies ORDER BY "createdAt" LOOP
     c_idx := c_idx + 1;
     SELECT id INTO admin_id FROM users WHERE "companyId" = c_rec.id AND role = 'ADMIN' LIMIT 1;
@@ -87,7 +88,10 @@ BEGIN
     END LOOP;
   END LOOP;
   
- 
+  -- ============================================
+  -- MESSAGE TEMPLATES
+  -- ============================================
+  
   INSERT INTO message_templates ("companyId", name, channel, subject, body, variables, "isDefault", "isActive")
   SELECT
     c.id,
@@ -116,6 +120,10 @@ BEGIN
      'Pay amount using link. Company Name',
      '["amount","payment_link","company_name"]'::jsonb, false)
   ) AS t(name, channel, subject, body, variables, "isDefault");
+  
+  -- ============================================
+  -- COMMUNICATION LOGS
+  -- ============================================
   
   INSERT INTO communication_logs (
     id, "companyId", channel, recipient, "recipientName", subject, body,

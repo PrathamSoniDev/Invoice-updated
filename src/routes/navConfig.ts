@@ -10,7 +10,7 @@ import {
   Settings,
   ShieldCheck,
   FileCode,
-  Crown,
+  Plug,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -50,8 +50,7 @@ export const navSections: NavSection[] = [
     items: [
       { label: 'Reports', path: '/reports', icon: BarChart3, module: 'reports' },
       { label: 'Settings', path: '/settings', icon: Settings, module: 'settings' },
-      // 'External Integrations' page is disabled — nav item removed so the sidebar
-      // doesn't link to a route that no longer exists (see App.tsx).
+      { label: 'External Integrations', path: '/settings/external-integrations', icon: Plug, module: 'settings' },
     ],
   },
   {
@@ -62,12 +61,6 @@ export const navSections: NavSection[] = [
       { label: 'Invoice Templates', path: '/admin/invoice-templates', icon: FileCode, module: 'admin', adminOnly: true },
       { label: 'Audit Logs', path: '/admin/audit-logs', icon: ShieldCheck, module: 'admin', adminOnly: true },
       { label: 'Usage Analytics', path: '/admin/usage', icon: BarChart3, module: 'admin', adminOnly: true },
-    ],
-  },
-  {
-    title: 'Platform',
-    items: [
-      { label: 'Master Console', path: '/master', icon: Crown, module: 'admin', roles: ['super_admin'] },
     ],
   },
 ];

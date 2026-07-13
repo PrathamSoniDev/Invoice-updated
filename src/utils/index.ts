@@ -53,11 +53,9 @@ export function timeAgo(date: string | Date): string {
   return 'just now';
 }
 
-export function getInitials(name: string | null | undefined): string {
-  if (!name || !name.trim()) return '?';
+export function getInitials(name: string): string {
   return name
     .split(' ')
-    .filter(Boolean)
     .map((n) => n[0])
     .slice(0, 2)
     .join('')

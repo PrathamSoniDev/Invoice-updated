@@ -1,13 +1,22 @@
+// server/services/emailService.js
+//
 // Email delivery service built on Resend.
 //
-//This module reads the Resend API key from process.env only.
-// It must NEVER be imported by frontend code. All email sending happens in backend
+// SECURITY: This module reads the Resend API key from process.env only.
+// It must NEVER be imported by frontend code. All email sending happens
+// here, in the backend, so the API key never reaches the browser bundle.
 
 import { Resend } from 'resend';
 
+// ---------------------------------------------------------------------------
+// Initialise the Resend client once. The API key is loaded from the
+// environment (server/.env) — never hard-coded, never sent to the client.
+// ---------------------------------------------------------------------------
 if (!process.env.RESEND_API_KEY) {
   // Fail fast at startup so misconfiguration is obvious during development.
-    console.error('[emailService] WARNING: RESEND_API_KEY is not set. Email sending will fail.');
+  // We throw here instead of crashing the whole process so the Express
+  // server can still boot and return clean 500s for email requests.
+  console.error('[emailService] WARNING: RESEND_API_KEY is not set. Email sending will fail.');
 }
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -243,71 +252,4 @@ export async function sendInvoiceEmail({ to, customerName, invoice }) {
   return { id: data?.id };
 }
 
-/**
- * Sends a welcome/invite email to a newly-created user, with a link to log
- * in. Does NOT include the admin-set password in plaintext — the recipient
- * uses "Forgot password" on first login if they weren't told it separately,
- * which is the safer default for anything sent over email.
- *
- * @param {{ to: string, name: string, companyName: string, loginUrl: string }} params
- */
-export async function sendInviteEmail({ to, name, companyName, loginUrl }) {
-  if (!process.env.RESEND_API_KEY) {
-    throw new Error('RESEND_API_KEY is not configured on the server.');
-  }
-  if (!to || typeof to !== 'string') {
-    throw new Error('A valid recipient email address ("to") is required.');
-  }
-
-  const html = `
-    <!DOCTYPE html>
-    <html>
-      <body style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#f8fafc; padding:32px 0; margin:0;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-          <tr>
-            <td align="center">
-              <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-                <tr>
-                  <td style="background:linear-gradient(135deg,#7c3aed,#a855f7); height:6px;"></td>
-                </tr>
-                <tr>
-                  <td style="padding:32px;">
-                    <h1 style="margin:0 0 16px; font-size:20px; color:#111827;">You've been invited to InvoiceGen</h1>
-                    <p style="margin:0 0 8px; font-size:14px; color:#374151;">Hi ${name || 'there'},</p>
-                    <p style="margin:0 0 20px; font-size:14px; color:#374151; line-height:1.6;">
-                      You've been added as a user${companyName ? ` for <strong>${companyName}</strong>` : ''} on InvoiceGen.
-                      Click below to log in. If this is your first time signing in, use "Forgot password" on the login page to set your own password.
-                    </p>
-                    <a href="${loginUrl}" style="display:inline-block; background:#7c3aed; color:#ffffff; text-decoration:none; padding:12px 24px; border-radius:8px; font-size:14px; font-weight:600;">
-                      Log in to InvoiceGen
-                    </a>
-                    <p style="margin:24px 0 0; font-size:12px; color:#9ca3af;">
-                      If you weren't expecting this invite, you can safely ignore this email.
-                    </p>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-      </body>
-    </html>
-  `;
-
-  const { data, error } = await resend.emails.send({
-    from: FROM_ADDRESS,
-    to,
-    subject: `You've been invited to InvoiceGen`,
-    html,
-  });
-
-  if (error) {
-    console.error('[emailService] Invite email failed:', error.message);
-    throw new Error(`Failed to send invite email: ${error.message}`);
-  }
-
-  console.log(`[emailService] Invite sent to ${to} (id: ${data?.id})`);
-  return { id: data?.id };
-}
-
-export default { sendInvoiceEmail, sendInviteEmail };
+export default { sendInvoiceEmail };

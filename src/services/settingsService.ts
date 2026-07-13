@@ -1,37 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from '@/lib/supabase';
 import { getCurrentCompanyId, getCurrentUserId } from '@/lib/database';
-import type { CompanyInfo, BankInfo, InvoiceSettings, CommunicationSettings, GatewaySettings, GatewayCredentialsUpdate } from '@/types';
-
-// Gateway credentials (razorpayKeySecret / paytmMerchantKey) are never read
-// or written directly against the `gateway_settings` table from the client
-// — they're encrypted at rest and only reachable through these two Edge
-// Functions (see supabase/functions/save-gateway-credentials and
-// get-gateway-status, and the 20260712120000_encrypt_gateway_credentials.sql
-// migration).
-async function invokeGatewayFunction<T>(name: 'save-gateway-credentials' | 'get-gateway-status', body?: Record<string, unknown>): Promise<T> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session?.access_token) {
-    throw new Error('Not authenticated');
-  }
-
-  const { data, error } = await supabase.functions.invoke(name, {
-    body: body ?? {},
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
-
-  if (error) {
-    throw new Error(error.message || `${name} failed`);
-  }
-  if (data?.error) {
-    throw new Error(data.error);
-  }
-
-  return data as T;
-}
+import type { CompanyInfo, BankInfo, InvoiceSettings, CommunicationSettings, GatewaySettings } from '@/types';
 
 export const settingsService = {
   async getCompanyProfile(): Promise<CompanyInfo | null> {
@@ -412,64 +382,57 @@ export const settingsService = {
   },
 
   async getGatewaySettings(): Promise<GatewaySettings | null> {
-    try {
-      const status = await invokeGatewayFunction<{
-        razorpay: { enabled: boolean; keyId: string; webhookSecret: string; upiId: string; keySecretPreview: string | null };
-        paytm: { enabled: boolean; merchantId: string; environment: 'TEST' | 'PROD'; upiId: string; merchantKeyPreview: string | null };
-      }>('get-gateway-status');
+    const companyId = await getCurrentCompanyId();
 
-      return {
-        razorpay: {
-          status: status.razorpay.enabled ? 'connected' : 'disconnected',
-          keyId: status.razorpay.keyId || '',
-          keySecretPreview: status.razorpay.keySecretPreview ?? null,
-          webhookSecret: status.razorpay.webhookSecret || '',
-          upiId: status.razorpay.upiId || '',
-        },
-        paytm: {
-          status: status.paytm.enabled ? 'connected' : 'disconnected',
-          merchantId: status.paytm.merchantId || '',
-          merchantKeyPreview: status.paytm.merchantKeyPreview ?? null,
-          environment: status.paytm.environment || 'TEST',
-          upiId: status.paytm.upiId || '',
-        },
-      };
-    } catch (err) {
-      console.error('[getGatewaySettings] get-gateway-status failed:', err instanceof Error ? err.message : err);
-      return null;
-    }
+    const { data, error } = await supabase
+      .from('gateway_settings')
+      .select('*')
+      .eq('companyId', companyId)
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    return {
+      razorpay: {
+        status: data.razorpayEnabled ? 'connected' : 'disconnected',
+      },
+      paytm: {
+        status: data.paytmEnabled ? 'connected' : 'disconnected',
+      },
+    };
   },
 
-  // NOTE: input.razorpay.keySecret / input.paytm.merchantKey are the
-  // plaintext NEW secret (only present when the user actually typed one in
-  // the Manage dialog). They're sent to the Edge Function over HTTPS and
-  // never written to gateway_settings from here — the function encrypts
-  // them server-side. Omitting the field leaves the stored secret untouched.
-  async updateGatewaySettings(input: GatewayCredentialsUpdate): Promise<GatewaySettings> {
-    if (input.razorpay) {
-      await invokeGatewayFunction('save-gateway-credentials', {
-        gateway: 'razorpay',
-        enabled: input.razorpay.status !== undefined ? input.razorpay.status === 'connected' : undefined,
-        keyId: input.razorpay.keyId,
-        keySecret: input.razorpay.keySecret,
-        webhookSecret: input.razorpay.webhookSecret,
-        upiId: input.razorpay.upiId,
-      });
-    }
-    if (input.paytm) {
-      await invokeGatewayFunction('save-gateway-credentials', {
-        gateway: 'paytm',
-        enabled: input.paytm.status !== undefined ? input.paytm.status === 'connected' : undefined,
-        merchantId: input.paytm.merchantId,
-        merchantKey: input.paytm.merchantKey,
-        environment: input.paytm.environment,
-        upiId: input.paytm.upiId,
-      });
-    }
+  async updateGatewaySettings(input: Partial<GatewaySettings>): Promise<GatewaySettings> {
+    const companyId = await getCurrentCompanyId();
 
-    const refreshed = await this.getGatewaySettings();
-    if (!refreshed) throw new Error('Failed to refresh gateway settings after update');
-    return refreshed;
+    const updateData: Record<string, any> = {};
+    if (input.razorpay?.status !== undefined) updateData.razorpayEnabled = input.razorpay.status === 'connected';
+    if (input.paytm?.status !== undefined) updateData.paytmEnabled = input.paytm.status === 'connected';
+
+    const { data: existing, error: existingError } = await supabase
+      .from('gateway_settings')
+      .select('*')
+      .eq('companyId', companyId)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+
+    const query = existing
+      ? supabase.from('gateway_settings').update(updateData).eq('companyId', companyId)
+      : supabase.from('gateway_settings').insert({ companyId, ...updateData });
+
+    const { data, error } = await query.select().single();
+
+    if (error) throw error;
+
+    return {
+      razorpay: {
+        status: data.razorpayEnabled ? 'connected' : 'disconnected',
+      },
+      paytm: {
+        status: data.paytmEnabled ? 'connected' : 'disconnected',
+      },
+    };
   },
 
   async getTaxConfigurations(): Promise<any[]> {

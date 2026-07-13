@@ -42,15 +42,15 @@ export const useModuleStore = create<ModuleState>((set, get) => ({
     } catch {
       // Fallback to default modules if API fails
       const defaultModules: ModuleConfig[] = [
-        { key: 'dashboard', label: 'Dashboard', description: 'Analytics overview', enabled: true, icon: 'LayoutDashboard', roles: ['super_admin', 'admin', 'manager', 'staff', 'viewer'] },
-        { key: 'customers', label: 'Customers', description: 'Customer management', enabled: true, icon: 'Users', roles: ['super_admin', 'admin', 'manager', 'staff'] },
-        { key: 'invoices', label: 'Invoices', description: 'Invoice management', enabled: true, icon: 'FileText', roles: ['super_admin', 'admin', 'manager', 'staff'] },
-        { key: 'payment-links', label: 'Payment Links', description: 'Payment links', enabled: true, icon: 'CreditCard', roles: ['super_admin', 'admin', 'manager', 'staff'] },
-        { key: 'whatsapp', label: 'WhatsApp', description: 'WhatsApp communication', enabled: true, icon: 'MessageCircle', roles: ['super_admin', 'admin', 'manager', 'staff'] },
-        { key: 'email', label: 'Email', description: 'Email communication', enabled: true, icon: 'Mail', roles: ['super_admin', 'admin', 'manager', 'staff'] },
-        { key: 'reports', label: 'Reports', description: 'Business reports', enabled: true, icon: 'BarChart3', roles: ['super_admin', 'admin', 'manager', 'viewer'] },
-        { key: 'settings', label: 'Settings', description: 'Company settings', enabled: true, icon: 'Settings', roles: ['super_admin', 'admin', 'manager'] },
-        { key: 'admin', label: 'Admin', description: 'Administration', enabled: true, icon: 'ShieldCheck', roles: ['super_admin', 'admin'] },
+        { key: 'dashboard', label: 'Dashboard', description: 'Analytics overview', enabled: true, icon: 'LayoutDashboard', roles: ['admin', 'manager', 'staff', 'viewer'] },
+        { key: 'customers', label: 'Customers', description: 'Customer management', enabled: true, icon: 'Users', roles: ['admin', 'manager', 'staff'] },
+        { key: 'invoices', label: 'Invoices', description: 'Invoice management', enabled: true, icon: 'FileText', roles: ['admin', 'manager', 'staff'] },
+        { key: 'payment-links', label: 'Payment Links', description: 'Payment links', enabled: true, icon: 'CreditCard', roles: ['admin', 'manager', 'staff'] },
+        { key: 'whatsapp', label: 'WhatsApp', description: 'WhatsApp communication', enabled: true, icon: 'MessageCircle', roles: ['admin', 'manager', 'staff'] },
+        { key: 'email', label: 'Email', description: 'Email communication', enabled: true, icon: 'Mail', roles: ['admin', 'manager', 'staff'] },
+        { key: 'reports', label: 'Reports', description: 'Business reports', enabled: true, icon: 'BarChart3', roles: ['admin', 'manager', 'viewer'] },
+        { key: 'settings', label: 'Settings', description: 'Company settings', enabled: true, icon: 'Settings', roles: ['admin', 'manager'] },
+        { key: 'admin', label: 'Admin', description: 'Administration', enabled: true, icon: 'ShieldCheck', roles: ['admin'] },
       ];
       set({ modules: defaultModules, isLoading: false, isInitialized: true });
     }

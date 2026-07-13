@@ -8,7 +8,6 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PaymentLinkStatusBadge } from '@/components/common/StatusBadge';
 import { paymentService } from '@/services/paymentService';
-import { useSearchIndexStore } from '@/store/searchIndexStore';
 import type { PaymentLink } from '@/types';
 import { formatCurrency, formatDate } from '@/utils';
 import { CreditCard, Plus, Copy, Eye } from 'lucide-react';
@@ -29,7 +28,6 @@ export function PaymentLinkListPage() {
     setLoading(true);
     paymentService.listLinks({ search, status: statusFilter, page, limit }).then((res) => {
       setLinks(res.data);
-      useSearchIndexStore.getState().setPaymentLinks(res.data);
       setTotal(res.total);
       setTotalPages(res.totalPages);
       setLoading(false);

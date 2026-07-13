@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { InvoiceStatusBadge } from '@/components/common/StatusBadge';
 import { invoiceService } from '@/services/invoiceService';
-import { useSearchIndexStore } from '@/store/searchIndexStore';
 import type { Invoice } from '@/types';
 import { formatCurrency, formatDate, getInitials, downloadCSV } from '@/utils';
 import { FileText, Plus, Copy, Eye } from 'lucide-react';
@@ -30,7 +29,6 @@ export function InvoiceListPage() {
     setLoading(true);
     invoiceService.list({ search, status: statusFilter, page, limit }).then((res) => {
       setInvoices(res.data);
-      useSearchIndexStore.getState().setInvoices(res.data);
       setTotal(res.total);
       setTotalPages(res.totalPages);
       setLoading(false);

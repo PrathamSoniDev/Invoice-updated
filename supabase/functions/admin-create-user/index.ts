@@ -1,3 +1,48 @@
+// Supabase Edge Function: admin-create-user
+//
+// Creates a new auth user using the Supabase Admin API (service role key).
+//
+// Why this exists:
+//   The Admin "Create User" flow previously called `supabase.auth.signUp()`
+//   from the browser. That endpoint is rate-limited per-IP/email and sends a
+//   confirmation email, which causes `429 email rate limit exceeded` errors
+//   when an admin creates several users in quick succession.
+//
+//   This Edge Function uses `supabase.auth.admin.createUser()` with the
+//   service role key, which:
+//     - bypasses the email rate limit (no confirmation email is sent),
+//     - sets `email_confirm: true` so the new user can sign in immediately,
+//     - runs server-side so the service role key is never exposed to the
+//       browser.
+//
+// IMPORTANT — no pre-existence check:
+//   This function does NOT call listUsers() or any manual "does this email
+//   already exist?" check before creating the user. Such pre-checks caused
+//   false-positive 409 conflicts (stale/paginated user lists, caching, race
+//   conditions) that blocked valid user creation even after the user had been
+//   fully deleted from Auth.
+//
+//   Instead we call createUser() directly and let Supabase be the single
+//   source of truth for duplicate handling. If the email is genuinely a
+//   duplicate, GoTrue returns an error which we surface to the caller.
+//
+// Security:
+//   - The caller MUST be authenticated (a valid JWT in the Authorization
+//     header).
+//   - The caller MUST have role = 'ADMIN' in the public.users table.
+//   - The service role key is read from the function's environment and is
+//     never returned to the client.
+//
+// Request body (JSON):
+//   { email: string, password: string, name: string, companyId: string }
+//
+// Response (JSON):
+//   200 { userId: string }
+//   400 { error: string }   — validation error or Supabase createUser error
+//   401 { error: string }   — not authenticated
+//   403 { error: string }   — not an admin
+//   500 { error: string }   — unexpected failure
+
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
@@ -74,15 +119,8 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Failed to verify admin status' }, 500);
   }
 
-  const isAdmin =
-  callerProfile &&
-  ['ADMIN', 'SUPER_ADMIN'].includes(callerProfile.role);
-
-  if (!isAdmin) {
-  return json(
-    { error: 'Forbidden: admin access required' },
-    403
-  );
+  if (!callerProfile || callerProfile.role !== 'ADMIN') {
+    return json({ error: 'Forbidden: admin access required' }, 403);
   }
 
   // ---- 3. Parse & validate the request body ------------------------------
@@ -91,11 +129,6 @@ Deno.serve(async (req: Request) => {
     password?: string;
     name?: string;
     companyId?: string;
-    role?: string;
-    companyName?: string;
-    status?: string;
-    phone?: string;
-    permissions?: string[];
   };
 
   try {
@@ -107,9 +140,7 @@ Deno.serve(async (req: Request) => {
   const email = (body.email ?? '').trim();
   const password = body.password ?? '';
   const name = (body.name ?? '').trim();
-  const requestedCompanyId = body.companyId ?? '';
-  const role = (body.role ?? '').toUpperCase();
-  const companyName = (body.companyName ?? '').trim();
+  const companyId = body.companyId ?? '';
 
   if (!email || !EMAIL_RE.test(email)) {
     return json({ error: 'Invalid email format' }, 400);
@@ -120,42 +151,26 @@ Deno.serve(async (req: Request) => {
   if (!name) {
     return json({ error: 'Name is required' }, 400);
   }
-  if (!requestedCompanyId) {
+  if (!companyId) {
     return json({ error: 'Company ID is required' }, 400);
   }
 
+  // ---- 4. Create the auth user via the Admin API -------------------------
+  // Direct create-only flow. We do NOT pre-check whether the email already
+  // exists (no listUsers(), no manual existence check). Supabase is the
+  // single source of truth for duplicate handling — if the email is a genuine
+  // duplicate, createUser() returns an error which we surface below.
   const adminClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  // ---- 4. Resolve the EFFECTIVE company ------------------------------------
-  // A new Admin gets their own, brand-new company (independent tenant) —
-  let effectiveCompanyId = requestedCompanyId;
-
-  if (role === 'ADMIN' && companyName) {
-    const { data: newCompany, error: companyError } = await adminClient
-      .from('companies')
-      .insert({ name: companyName, legalName: companyName, email })
-      .select('id')
-      .maybeSingle();
-
-    if (companyError || !newCompany) {
-      console.error('[admin-create-user] new company creation failed:', companyError?.message);
-      return json({ error: companyError?.message ?? 'Failed to create company for new admin' }, 500);
-    }
-    effectiveCompanyId = newCompany.id;
-  }
-
-  // ---- 5. Create the auth user via the Admin API -------------------------
-  // Direct create-only flow. We do NOT pre-check whether the email already
-
-  console.debug('[admin-create-user] createUser payload:', JSON.stringify({ email, name, companyId: effectiveCompanyId, role }));
+  console.debug('[admin-create-user] createUser payload:', JSON.stringify({ email, name, companyId }));
 
   const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
-    user_metadata: { name, companyId: effectiveCompanyId },
+    user_metadata: { name, companyId },
   });
 
   // Handle errors ONLY from the Supabase response. No manual "user exists"
@@ -169,38 +184,6 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Failed to create auth user' }, 500);
   }
 
-  // ---- 6. Create the `public.users` profile row using the service role ---
-  // This MUST happen here (service role), not from the browser with the
-  // caller's own session. The RLS policy `insert_own_users` only allows
-  // `"companyId" = public.get_company_id()` (i.e. the caller's own company),
-  // so a client-side insert would be rejected by RLS whenever a brand-new
-  // Admin/company was just created above — which is exactly the scenario
-  // this function exists for. Doing the insert here with the service role
-  // bypasses that mismatch entirely.
-  const { data: profile, error: profileInsertError } = await adminClient
-    .from('users')
-    .insert({
-      id: authData.user.id,
-      companyId: effectiveCompanyId,
-      name,
-      email,
-      role: role || 'STAFF',
-      status: body.status ? body.status.toUpperCase() : 'INVITED',
-      phone: body.phone || null,
-      permissions: Array.isArray(body.permissions) ? body.permissions : [],
-    })
-    .select('*, companies!users_companyId_fkey(id, name)')
-    .maybeSingle();
-
-  if (profileInsertError || !profile) {
-    console.error('[admin-create-user] profile insert failed:', profileInsertError?.message);
-    // Roll back the orphaned auth user so retrying with the same email works.
-    await adminClient.auth.admin.deleteUser(authData.user.id).catch((e) =>
-      console.error('[admin-create-user] rollback deleteUser failed:', e)
-    );
-    return json({ error: profileInsertError?.message ?? 'Failed to create user profile' }, 500);
-  }
-
-  // ---- 7. Return the new auth user id + effective company id + profile ---
-  return json({ userId: authData.user.id, companyId: effectiveCompanyId, profile }, 200);
+  // ---- 5. Return the new auth user id ------------------------------------
+  return json({ userId: authData.user.id }, 200);
 });

@@ -1,3 +1,7 @@
+/*
+# InvoiceGen Enterprise Demo Data Seed - Part 4: Invoices & Items (100 per company)
+*/
+
 DO $$
 DECLARE
   c_rec RECORD;
@@ -16,11 +20,6 @@ DECLARE
   c_idx INTEGER;
   prefix TEXT;
 BEGIN
-  IF EXISTS (SELECT 1 FROM invoices LIMIT 1) THEN
-    RAISE NOTICE 'Demo invoices already seeded — skipping.';
-    RETURN;
-  END IF;
-
   c_idx := 0;
   
   FOR c_rec IN SELECT id, name, "createdAt" FROM companies ORDER BY "createdAt" LOOP

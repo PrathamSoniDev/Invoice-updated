@@ -41,7 +41,6 @@ export function Sidebar() {
         {navSections.map((section) => {
           const visibleItems = section.items.filter((item) => {
             if (item.adminOnly && !isAdmin) return false;
-            if (item.roles && (!user || !item.roles.includes(user.role))) return false;
             if (item.module !== 'admin' && !user?.permissions.includes(item.module)) return false;
             return isModuleEnabled(item.module);
           });
@@ -136,7 +135,6 @@ export function MobileSidebar() {
               {navSections.map((section) => {
                 const visibleItems = section.items.filter((item) => {
                   if (item.adminOnly && !isAdmin) return false;
-                  if (item.roles && (!user || !item.roles.includes(user.role))) return false;
                   if (item.module !== 'admin' && !user?.permissions.includes(item.module)) return false;
                   return isModuleEnabled(item.module);
                 });

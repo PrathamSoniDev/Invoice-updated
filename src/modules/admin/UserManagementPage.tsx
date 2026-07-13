@@ -45,10 +45,6 @@ const ROLE_PERMISSIONS: Record<UserRole, ModuleKey[]> = {
   manager: ['dashboard', 'customers', 'invoices', 'payment-links', 'whatsapp', 'email', 'reports', 'settings'],
   staff: ['dashboard', 'customers', 'invoices', 'payment-links', 'whatsapp', 'email'],
   viewer: ['dashboard', 'reports'],
-  // Not creatable from this UI (the Role select below has no super_admin
-  // option) — present only so this stays a valid Record<UserRole, ...> now
-  // that 'super_admin' is part of the UserRole union.
-  super_admin: ['dashboard', 'customers', 'invoices', 'payment-links', 'whatsapp', 'email', 'reports', 'settings', 'admin'],
 };
 
 export function UserManagementPage() {
@@ -102,10 +98,6 @@ export function UserManagementPage() {
       toast.error('Name, email, and password are required');
       return;
     }
-    if (role === 'admin' && !companyName.trim()) {
-      toast.error('Company Name is required when creating an Admin — it becomes that Admin\'s own company, separate from yours');
-      return;
-    }
     const emailValid = isValidEmail(email);
     // [DEBUG:email-validation] Frontend validation result for the entered email.
     console.debug('[createUser] Point 1b — isValidEmail result:', emailValid, 'for', JSON.stringify(email));
@@ -133,35 +125,6 @@ export function UserManagementPage() {
       setCreateOpen(false);
       resetForm();
       toast.success('User created successfully');
-
-      // Fire the invite email after creation succeeds. This is best-effort:
-      // a failure here shouldn't undo the user that was just created, so it
-      // only shows a secondary toast rather than throwing.
-      try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
-        const inviteResponse = await fetch(`${apiUrl}/users/send-invite`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, name, companyName: newUser.companyName || companyName }),
-        });
-        let inviteResult: { message?: string } = {};
-        try {
-          inviteResult = await inviteResponse.json();
-        } catch {
-          // Non-JSON response (e.g. the backend isn't running and a dev
-          // server / proxy returned an HTML error page instead).
-        }
-        if (!inviteResponse.ok) {
-          throw new Error(inviteResult.message || `Failed to send invite email (HTTP ${inviteResponse.status})`);
-        }
-      } catch (inviteError) {
-        console.error('[createUser] invite email failed:', inviteError);
-        toast.error(
-          inviteError instanceof Error
-            ? `User created, but invite email failed: ${inviteError.message}`
-            : 'User created, but the invite email failed to send.'
-        );
-      }
     } catch (error) {
       // [DEBUG:email-validation] Full error stack from the backend/service layer.
       console.error('[createUser] Point 5 — error caught in UI:', error instanceof Error ? error.stack : error);
@@ -304,17 +267,8 @@ export function UserManagementPage() {
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="John Doe" />
             </div>
             <div className="space-y-2">
-              <Label>Company Name{role === 'admin' ? ' *' : ''}</Label>
+              <Label>Company Name</Label>
               <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Acme Corp" />
-              {role === 'admin' ? (
-                <p className="text-xs text-muted-foreground">
-                  A new Admin gets their own company/tenant — enter its name here. Leave blank for other roles to join your company.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Only used when Role is Admin. Other roles automatically join your company.
-                </p>
-              )}
             </div>
             <div className="space-y-2">
               <Label>Email *</Label>

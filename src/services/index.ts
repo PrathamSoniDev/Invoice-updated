@@ -1,6 +1,5 @@
 // Re-export all services from their new Supabase-based implementations
 export { customerService } from './customerService';
-export { scheduledReportsService } from './scheduledReportsService';
 export { invoiceService } from './invoiceService';
 export { paymentService } from './paymentService';
 export { dashboardService, dashboardApi } from './dashboardService';

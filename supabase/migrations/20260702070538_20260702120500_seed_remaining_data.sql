@@ -8,10 +8,9 @@ DECLARE
   u_rec RECORD;
 BEGIN
 
-IF EXISTS (SELECT 1 FROM invoice_templates LIMIT 1) THEN
-  RAISE NOTICE 'Demo templates/remaining data already seeded — skipping.';
-  RETURN;
-END IF;
+-- ============================================
+-- INVOICE TEMPLATES (5 per company)
+-- ============================================
 
 INSERT INTO invoice_templates ("companyId", name, description, type, status, content, "isDefault", version, tags)
 SELECT
@@ -32,6 +31,10 @@ CROSS JOIN (VALUES
   ('Retail Standard', 'Perfect for retail businesses', '<html><body><div class="retail-header">{{logo}}</div></body></html>', false, '["retail","colorful"]'::jsonb),
   ('Corporate Elite', 'Premium corporate template', '<html><body><div class="corporate"><header>{{header}}</header></div></body></html>', false, '["corporate","premium"]'::jsonb)
 ) AS t(name, description, content, "isDefault", tags);
+
+-- ============================================
+-- NOTIFICATIONS (5 per user)
+-- ============================================
 
 INSERT INTO notifications ("companyId", "userId", type, title, message, "isRead", "readAt", data)
 SELECT
@@ -67,6 +70,9 @@ SELECT
 FROM users u
 CROSS JOIN generate_series(1, 5) g;
 
+-- ============================================
+-- ACTIVITY LOGS (20 per user)
+-- ============================================
 
 INSERT INTO activity_logs ("companyId", "userId", action, description, "entityType", "entityId", "ipAddress", "userAgent")
 SELECT
@@ -93,6 +99,10 @@ CROSS JOIN (VALUES
 ) AS a(action, description, "entityType")
 ORDER BY random()
 LIMIT 500;
+
+-- ============================================
+-- AUDIT LOGS (100+ entries)
+-- ============================================
 
 INSERT INTO audit_logs (
   "companyId", "userId", action, "entityType", "entityId", "oldValues", "newValues", "ipAddress", "userAgent"
@@ -122,6 +132,9 @@ FROM users u
 ORDER BY random()
 LIMIT 200;
 
+-- ============================================
+-- EXTERNAL INTEGRATIONS
+-- ============================================
 
 INSERT INTO external_integrations ("companyId", provider, status, config, credentials, "lastSyncAt", "syncStatus")
 SELECT
@@ -155,6 +168,9 @@ CROSS JOIN (VALUES
   ('SAP'::"IntegrationProvider")
 ) AS p(provider);
 
+-- ============================================
+-- SAVED REPORTS
+-- ============================================
 
 INSERT INTO saved_reports ("companyId", name, type, config, "scheduleEnabled", "createdById")
 SELECT
@@ -173,6 +189,9 @@ CROSS JOIN (VALUES
   ('Payment Gateway Report', 'gateway', '{"gateway":"all","dateRange":"monthly"}'::jsonb)
 ) AS r(name, type, config);
 
+-- ============================================
+-- EXPORT HISTORY
+-- ============================================
 
 INSERT INTO export_history ("companyId", "userId", type, format, status, "fileUrl", "fileSize", "completedAt")
 SELECT
