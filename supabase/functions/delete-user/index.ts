@@ -27,7 +27,7 @@
 //
 // Security:
 //   - The caller MUST be authenticated (valid JWT in Authorization header).
-//   - The caller MUST have role = 'ADMIN' in public.users.
+//   - The caller MUST have role = 'ADMIN' or 'SUPER_ADMIN' in public.users.
 //   - The service role key is read from the function environment and is NEVER
 //     returned to the client.
 //
@@ -111,7 +111,7 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Failed to verify admin status' }, 500);
   }
 
-  if (!callerProfile || callerProfile.role !== 'ADMIN') {
+  if (!callerProfile || !['ADMIN', 'SUPER_ADMIN'].includes(callerProfile.role)) {
     return json({ error: 'Forbidden: admin access required' }, 403);
   }
 

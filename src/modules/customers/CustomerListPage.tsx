@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { customerService } from '@/services/customerService';
+import { CustomerImportDialog } from '@/components/customers/CustomerImportDialog';
+import { useSearchIndexStore } from '@/store/searchIndexStore';
 import type { Customer } from '@/types';
 import { formatCurrency, getInitials, downloadCSV } from '@/utils';
 import { Users, Plus, Upload, Mail, Phone } from 'lucide-react';
@@ -23,16 +25,22 @@ export function CustomerListPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [importOpen, setImportOpen] = useState(false);
   const limit = 10;
 
-  useEffect(() => {
+  const refresh = () => {
     setLoading(true);
     customerService.list({ search, status: statusFilter, page, limit }).then((res) => {
       setCustomers(res.data);
+      useSearchIndexStore.getState().setCustomers(res.data);
       setTotal(res.total);
       setTotalPages(res.totalPages);
       setLoading(false);
     });
+  };
+
+  useEffect(() => {
+    refresh();
   }, [search, statusFilter, page]);
 
   const columns: Column<Customer>[] = [
@@ -108,7 +116,7 @@ export function CustomerListPage() {
         icon={Users}
         actions={
           <>
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.info('CSV import dialog would open here')}>
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4" /> Import
             </Button>
             <Button size="sm" className="gap-2" onClick={() => navigate('/customers/new')}>
@@ -147,6 +155,8 @@ export function CustomerListPage() {
         />
         <Pagination page={page} totalPages={totalPages} total={total} limit={limit} onPageChange={setPage} />
       </Card>
+
+      <CustomerImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={refresh} />
     </div>
   );
 }
