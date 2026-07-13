@@ -5,6 +5,16 @@ import { StatCard } from '@/components/common/StatCard';
 import { ChartWrapper } from '@/components/common/ChartWrapper';
 import { ExportButton } from '@/components/common/ExportButton';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -23,11 +33,13 @@ import { reportsApi, dashboardApi } from '@/utils/api';
 import { invoiceService } from '@/services/invoiceService';
 import { customerService } from '@/services/customerService';
 import { paymentService } from '@/services/paymentService';
-import { BarChart3, Wallet, FileText, TrendingUp, Clock, AlertTriangle, Loader2 } from 'lucide-react';
+import { BarChart3, Wallet, FileText, TrendingUp, Clock, AlertTriangle, Loader2, CalendarClock, Trash2 } from 'lucide-react';
 import type { Invoice, Customer, Payment, CompanyInfo } from '@/types';
 import { useAuthStore } from '@/store/authStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import type { ReportConfig } from '@/utils/reportExport';
+import { scheduledReportsService, type ScheduledReport, type ReportFrequency } from '@/services/scheduledReportsService';
+import { toast } from 'sonner';
 
 const chartTooltipStyle = {
   backgroundColor: 'hsl(var(--card))',
@@ -83,6 +95,64 @@ export function ReportsPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+
+  // ---- Scheduled report delivery ----
+  const [schedules, setSchedules] = useState<ScheduledReport[]>([]);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleFrequency, setScheduleFrequency] = useState<ReportFrequency>('weekly');
+  const [scheduleEmails, setScheduleEmails] = useState('');
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+
+  const loadSchedules = useCallback(async () => {
+    try {
+      const list = await scheduledReportsService.list();
+      setSchedules(list);
+    } catch (error) {
+      console.error('Failed to load scheduled reports:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSchedules();
+  }, [loadSchedules]);
+
+  const handleCreateSchedule = async () => {
+    const emails = scheduleEmails
+      .split(',')
+      .map((e) => e.trim())
+      .filter(Boolean);
+    if (emails.length === 0) {
+      toast.error('Add at least one recipient email');
+      return;
+    }
+    setScheduleSaving(true);
+    try {
+      await scheduledReportsService.create({
+        reportType: activeReport,
+        filters: { dateRange },
+        frequency: scheduleFrequency,
+        recipientEmails: emails,
+      });
+      toast.success('Report scheduled');
+      setScheduleDialogOpen(false);
+      setScheduleEmails('');
+      await loadSchedules();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to schedule report');
+    } finally {
+      setScheduleSaving(false);
+    }
+  };
+
+  const handleDeleteSchedule = async (id: string) => {
+    try {
+      await scheduledReportsService.delete(id);
+      setSchedules((prev) => prev.filter((s) => s.id !== id));
+      toast.success('Schedule removed');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to remove schedule');
+    }
+  };
 
   const loadReportData = useCallback(async () => {
     setIsLoading(true);
@@ -298,6 +368,9 @@ export function ReportsPage() {
                 <SelectItem value="12m">Last 12 months</SelectItem>
               </SelectContent>
             </Select>
+            <Button variant="outline" className="gap-2" onClick={() => setScheduleDialogOpen(true)}>
+              <CalendarClock className="h-4 w-4" /> Schedule
+            </Button>
             <ExportButton
               reportTitle={activeExportConfig.title}
               config={activeExportConfig}
@@ -454,6 +527,76 @@ export function ReportsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Existing scheduled reports */}
+      {schedules.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarClock className="h-4 w-4" /> Scheduled Reports
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {schedules.map((schedule) => (
+              <div key={schedule.id} className="flex items-center justify-between rounded-md border p-3 text-sm">
+                <div>
+                  <span className="font-medium capitalize">{schedule.reportType}</span>
+                  <span className="text-muted-foreground"> — {schedule.frequency}, to {schedule.recipientEmails.join(', ')}</span>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Next send: {formatDate(schedule.nextSendAt)}
+                    {schedule.lastSentAt ? ` · Last sent: ${formatDate(schedule.lastSentAt)}` : ''}
+                  </p>
+                </div>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDeleteSchedule(schedule.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Schedule dialog */}
+      <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-primary" /> Schedule this report
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              The <span className="font-medium capitalize">{activeReport}</span> report will be regenerated and emailed automatically.
+            </p>
+            <div className="space-y-2">
+              <Label>Frequency</Label>
+              <Select value={scheduleFrequency} onValueChange={(v) => setScheduleFrequency(v as ReportFrequency)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Recipient Emails</Label>
+              <Input
+                value={scheduleEmails}
+                onChange={(e) => setScheduleEmails(e.target.value)}
+                placeholder="you@company.com, finance@company.com"
+              />
+              <p className="text-xs text-muted-foreground">Comma-separated for multiple recipients.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setScheduleDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreateSchedule} disabled={scheduleSaving}>
+              {scheduleSaving ? 'Saving…' : 'Schedule'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

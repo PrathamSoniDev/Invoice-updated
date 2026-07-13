@@ -2,7 +2,7 @@
 import { create } from 'zustand';
 import { supabase, ensureUserProfile, fetchUserProfile, type UserProfile } from '@/lib/supabase';
 import type { User } from '@/types';
-import { normalizePermissions } from '@/utils/permissions';
+import { DEFAULT_ADMIN_PERMISSIONS, normalizePermissions } from '@/utils/permissions';
 
 interface AuthState {
   user: User | null;
@@ -14,6 +14,39 @@ interface AuthState {
   initialize: () => Promise<void>;
   updateUser: (user: Partial<User>) => void;
   refreshUser: () => Promise<void>;
+}
+
+/**
+ * Calls the check-login-attempts Edge Function. Used two ways:
+ *   - callLoginAttemptsGuard({ email })                      -> pre-check
+ *   - callLoginAttemptsGuard({ email, outcome: 'success' })   -> post-record
+ * Never throws — a guard failure should never itself block login (see the
+ * "fail open" comment in the Edge Function), so this resolves to a safe
+ * default on any network/parse error instead of rejecting.
+ */
+async function callLoginAttemptsGuard(
+  payload: { email: string; outcome?: 'success' | 'failure' },
+): Promise<{ allowed: boolean; message?: string }> {
+  try {
+    const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-login-attempts`;
+    const response = await fetch(functionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (response.status === 429) {
+      return { allowed: false, message: result.message || 'Too many login attempts. Please wait a minute before trying again.' };
+    }
+    return { allowed: result.allowed !== false };
+  } catch (error) {
+    console.error('[authStore] check-login-attempts call failed (failing open):', error);
+    return { allowed: true };
+  }
 }
 
 function getInitials(name: string): string {
@@ -48,7 +81,10 @@ function mapProfileToUser(userData: UserProfile): User {
     avatar: userData.avatar || generateAvatar(userData.name),
     phone: userData.phone || undefined,
     companyName: company?.name,
-    permissions: normalizePermissions(userData.permissions),
+    permissions:
+    userData.role === 'SUPER_ADMIN'
+    ? DEFAULT_ADMIN_PERMISSIONS
+    : normalizePermissions(userData.permissions),
     lastActive: userData.lastActiveAt || new Date().toISOString(),
     createdAt: userData.createdAt,
     companyInfo: company ? {
@@ -92,7 +128,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const profile = await ensureUserProfile(session.user);
 
         if (profile) {
-          set({ user: mapProfileToUser(profile), isAuthenticated: true, isInitialized: true });
+          const mappedUser = mapProfileToUser(profile);
+          set({
+            user: mappedUser,
+            isAuthenticated: true,
+            isInitialized: true,
+          });
         } else {
           set({ isInitialized: true });
         }
@@ -125,17 +166,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     void rememberMe; // Acknowledge parameter
     set({ isLoading: true });
     try {
+      const guard = await callLoginAttemptsGuard({ email });
+      if (!guard.allowed) {
+        set({ isLoading: false });
+        return { success: false, error: guard.message || 'Too many login attempts. Please wait a minute before trying again.' };
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (error) {
+        void callLoginAttemptsGuard({ email, outcome: 'failure' });
         set({ isLoading: false });
         return { success: false, error: error.message };
       }
 
       if (data.user) {
+        void callLoginAttemptsGuard({ email, outcome: 'success' });
+
         // Ensure a profile exists for this user (covers existing auth users
         // that never received a public.users row, e.g. invited users).
         const profile = await ensureUserProfile(data.user);

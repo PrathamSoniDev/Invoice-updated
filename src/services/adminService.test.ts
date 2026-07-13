@@ -82,14 +82,10 @@ function mockSuccessfulCreateUser(authUserId: string, returnedUser: Record<strin
   fetchMock.mockResolvedValue({
     ok: true,
     status: 200,
-    json: async () => ({ userId: authUserId }),
-  });
-  insertMock.mockReturnValue({
-    select: vi.fn().mockReturnValue({
-      maybeSingle: vi.fn().mockResolvedValue({
-        data: returnedUser,
-        error: null,
-      }),
+    json: async () => ({
+      userId: authUserId,
+      companyId: (returnedUser.companies as { id?: string } | undefined)?.id ?? 'company-123',
+      profile: returnedUser,
     }),
   });
 }
@@ -335,23 +331,16 @@ describe('adminService.createUser — email validation (integration)', () => {
       ).rejects.toThrow('User already exists. Please reuse or reset password.');
     });
 
-    it('throws "Email already exists" when the profile insert hits the unique constraint (race condition)', async () => {
+    it('surfaces the Edge Function\'s error when the profile insert fails (e.g. race-condition unique constraint)', async () => {
       duplicateCheckMock.mockResolvedValue({ data: null });
       getSessionMock.mockResolvedValue({
         data: { session: { access_token: 'test-access-token' } },
       });
       fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ userId: 'auth-user-race' }),
-      });
-      // Simulate the UNIQUE(companyId, email) constraint firing on insert.
-      insertMock.mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          maybeSingle: vi.fn().mockResolvedValue({
-            data: null,
-            error: { message: 'duplicate key value violates unique constraint "users_companyId_email_key"' },
-          }),
+        ok: false,
+        status: 500,
+        json: async () => ({
+          error: 'duplicate key value violates unique constraint "users_companyId_email_key"',
         }),
       });
 
@@ -361,7 +350,7 @@ describe('adminService.createUser — email validation (integration)', () => {
           email: 'john1@example.com',
           role: 'staff',
         }),
-      ).rejects.toThrow('Email already exists');
+      ).rejects.toThrow(/duplicate key/);
     });
   });
 
