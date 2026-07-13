@@ -1,1 +1,21 @@
-{"name": "invoicegen-server", "version": "1.0.0", "description": "InvoiceGen backend — Express API for invoice email delivery via Resend", "type": "module", "main": "index.js", "scripts": {"start": "node index.js", "dev": "node --watch index.js"}, "dependencies": {"cors": "^2.8.5", "dotenv": "^16.4.5", "express": "^4.21.2", "resend": "^6.17.1"}}
+{
+  "name": "invoicegen-server",
+  "version": "1.0.0",
+  "description": "InvoiceGen backend \u2014 Express API for invoice email delivery via Resend",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.0",
+    "cors": "^2.8.5",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "paytmchecksum": "^1.5.0",
+    "razorpay": "^2.9.6",
+    "resend": "^6.17.1"
+  }
+}

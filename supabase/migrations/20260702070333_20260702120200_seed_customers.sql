@@ -19,6 +19,11 @@ DECLARE
   states TEXT[] := ARRAY['Maharashtra', 'Delhi', 'Karnataka', 'Tamil Nadu', 'Telangana', 'Maharashtra', 'West Bengal', 'Gujarat', 'Rajasthan', 'Uttar Pradesh'];
   business_types TEXT[] := ARRAY['Technologies', 'Solutions', 'Industries', 'Enterprises', 'Systems', 'Services', 'Consulting', 'Traders', 'Manufacturing', 'Exports'];
 BEGIN
+  IF EXISTS (SELECT 1 FROM customers LIMIT 1) THEN
+    RAISE NOTICE 'Demo customers already seeded — skipping.';
+    RETURN;
+  END IF;
+
   c_idx := 0;
   
   FOR c_rec IN SELECT id, name FROM companies ORDER BY "createdAt" LOOP

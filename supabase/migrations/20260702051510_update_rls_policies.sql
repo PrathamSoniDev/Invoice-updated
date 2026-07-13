@@ -1,11 +1,4 @@
--- ============================================
--- INVOICEGEN ENTERPRISE - RLS POLICIES UPDATE
--- Update existing RLS policies to use auth.uid() for direct client access
--- ============================================
-
--- ============================================
 -- HELPER FUNCTIONS FOR RLS
--- ============================================
 CREATE OR REPLACE FUNCTION public.get_company_id()
 RETURNS uuid LANGUAGE sql STABLE AS $$
   SELECT "companyId" FROM public.users WHERE id = auth.uid() LIMIT 1;
@@ -19,9 +12,7 @@ RETURNS boolean LANGUAGE sql STABLE AS $$
   );
 $$;
 
--- ============================================
 -- COMPANIES - Update Policies
--- ============================================
 DROP POLICY IF EXISTS "service_all_companies" ON companies;
 
 DROP POLICY IF EXISTS "select_own_company" ON companies;
@@ -36,9 +27,7 @@ CREATE POLICY "update_own_company" ON companies FOR UPDATE
   TO authenticated USING (id = public.get_company_id() AND public.is_admin())
   WITH CHECK (id = public.get_company_id() AND public.is_admin());
 
--- ============================================
 -- USERS - Update Policies
--- ============================================
 DROP POLICY IF EXISTS "service_all_users" ON users;
 
 CREATE POLICY "select_own_users" ON users FOR SELECT

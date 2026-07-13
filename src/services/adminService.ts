@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from '@/lib/supabase';
 import { getCurrentCompanyId, paginate, logAudit } from '@/lib/database';
-import type { User, ActivityLog, ModuleConfig } from '@/types';
+import type { User, ActivityLog, ModuleConfig, AuditLog, UserRole } from '@/types';
 import { normalizeModuleKey, normalizePermissions, normalizeRoles, toDbModuleKey } from '@/utils/permissions';
 import { assertValidEmail, isValidEmail } from '@/utils/validation';
 
@@ -18,6 +18,37 @@ function transformUser(row: any): User {
     createdAt: row.createdAt,
     permissions: normalizePermissions(row.permissions),
     companyName: row.companies?.name,
+  };
+}
+
+// Raw `audit_logs` rows don't carry userName/userRole/module/entityName/
+// description/timestamp/changes directly — this maps the actual columns
+// (plus the joined `users` relation) onto the shape AuditLogsPage expects.
+function transformAuditLog(row: any): AuditLog {
+  const changes =
+    row.oldValues || row.newValues
+      ? Object.keys({ ...(row.oldValues || {}), ...(row.newValues || {}) }).reduce(
+          (acc, field) => {
+            acc[field] = { from: row.oldValues?.[field], to: row.newValues?.[field] };
+            return acc;
+          },
+          {} as Record<string, { from: unknown; to: unknown }>
+        )
+      : undefined;
+
+  return {
+    id: row.id,
+    userId: row.userId,
+    userName: row.users?.name || 'Unknown user',
+    userRole: (row.users?.role?.toLowerCase() as UserRole) || 'viewer',
+    action: row.action?.toLowerCase() as AuditLog['action'],
+    module: row.entityType,
+    entityId: row.entityId,
+    entityName: row.entityId || row.entityType,
+    description: `${row.action?.toLowerCase() || 'unknown'} on ${row.entityType || 'record'}`,
+    ipAddress: row.ipAddress || '—',
+    timestamp: row.createdAt,
+    changes,
   };
 }
 
@@ -137,13 +168,21 @@ export const adminService = {
     const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-create-user`;
 
     // [DEBUG:email-validation] Point 4b — payload sent to the Edge Function.
+    // `role` and `companyName` let the function create a brand-new company
+    // when creating an Admin, instead of always reusing the caller's own
+    // company — see admin-create-user/index.ts for why.
     const edgePayload = {
       email: normalizedEmail,
       password: input.password,
       name: input.name,
       companyId,
+      role: input.role,
+      companyName: input.companyName,
+      status: input.status,
+      phone: input.phone,
+      permissions: input.permissions,
     };
-    console.debug('[adminService.createUser] Point 4b — Edge Function payload:', JSON.stringify({ email: edgePayload.email, name: edgePayload.name, companyId: edgePayload.companyId }));
+    console.debug('[adminService.createUser] Point 4b — Edge Function payload:', JSON.stringify({ email: edgePayload.email, name: edgePayload.name, companyId: edgePayload.companyId, role: edgePayload.role, companyName: edgePayload.companyName }));
 
     const edgeResponse = await fetch(functionUrl, {
       method: 'POST',
@@ -158,7 +197,7 @@ export const adminService = {
     const edgeResult = await edgeResponse.json();
 
     // [DEBUG:email-validation] Point 4c — Edge Function response.
-    console.debug('[adminService.createUser] Point 4c — Edge Function result:', edgeResponse.ok ? { userId: edgeResult.userId } : { status: edgeResponse.status, error: edgeResult.error });
+    console.debug('[adminService.createUser] Point 4c — Edge Function result:', edgeResponse.ok ? { userId: edgeResult.userId, companyId: edgeResult.companyId } : { status: edgeResponse.status, error: edgeResult.error });
 
     if (!edgeResponse.ok) {
       // The Edge Function returns Supabase's error message directly. If the
@@ -172,33 +211,22 @@ export const adminService = {
     const authUserId = edgeResult.userId as string;
     if (!authUserId) throw new Error('Failed to create user');
 
-    // Create the user profile (maybeSingle handles the insert-returning-one-row
-    // case without throwing 406 if zero rows are returned)
-    const { data, error } = await supabase
-      .from('users')
-      .insert({
-        id: authUserId,
-        companyId,
-        name: input.name,
-        email: normalizedEmail,
-        role: input.role.toUpperCase(),
-        status: input.status ? input.status.toUpperCase() : 'INVITED',
-        phone: input.phone || null,
-        permissions: input.permissions || [],
-      })
-      .select('*, companies!users_companyId_fkey(id, name)')
-      .maybeSingle();
-
-    if (error) {
-      // Race-condition safety net: if a concurrent request inserted the same
-      // email between our pre-check and this insert, the UNIQUE(companyId,email)
-      // constraint fires. Surface it with the same friendly message.
-      if (/duplicate key|unique constraint|users_companyId_email_key/i.test(error.message)) {
-        throw new Error('Email already exists');
-      }
-      throw error;
+    // The Edge Function creates the `public.users` profile row itself using
+    // the service role (see admin-create-user/index.ts). Doing that insert
+    // from the browser with the caller's own session used to fail — or
+    // silently fall back to the caller's own company — because the
+    // `insert_own_users` RLS policy only allows
+    // `"companyId" = public.get_company_id()`, which a brand-new Admin's
+    // brand-new company never satisfies. The service-role insert bypasses
+    // that mismatch entirely, so we just consume the profile it returns.
+    const data = edgeResult.profile;
+    if (!data) {
+      throw new Error(
+        'Server did not return the created user profile. This usually means the ' +
+        '"admin-create-user" Edge Function on Supabase is out of date — redeploy it ' +
+        '(supabase functions deploy admin-create-user) and try again.'
+      );
     }
-    if (!data) throw new Error('Failed to create user profile');
 
     await logAudit('create', 'users', data.id, input.name, `Created user ${input.name}`);
 
@@ -371,15 +399,25 @@ export const adminService = {
     const page = params?.page || 1;
     const limit = params?.limit || 20;
 
+    // Raw `audit_logs` columns (companyId, userId, action, entityType,
+    // entityId, oldValues, newValues, ipAddress, userAgent, createdAt) don't
+    // match what the AuditLogsPage UI expects (userName, userRole, module,
+    // entityName, description, timestamp, changes) — join `users` for the
+    // denormalized name/role, and map the rest below in transformAuditLog().
     let query = supabase
       .from('audit_logs')
-      .select('*', { count: 'exact' })
+      .select('*, users!userId(name, role)', { count: 'exact' })
       .eq('companyId', companyId)
       .order('createdAt', { ascending: false });
 
     if (params?.search) {
       const searchTerm = params.search;
-      query = query.or(`userName.ilike.%${searchTerm}%,entityName.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
+      // entityId/ipAddress are the only free-text columns actually on this
+      // table; searching by user name would require filtering on the
+      // joined `users` relation, which PostgREST .or() can't combine with
+      // top-level columns in one call — left out rather than referencing
+      // nonexistent columns.
+      query = query.or(`entityType.ilike.%${searchTerm}%,entityId.ilike.%${searchTerm}%,ipAddress.ilike.%${searchTerm}%`);
     }
 
     if (params?.action && params.action !== 'all') {
@@ -387,11 +425,15 @@ export const adminService = {
     }
 
     if (params?.module && params.module !== 'all') {
-      query = query.eq('module', params.module);
+      // No `module` column exists; `entityType` is the closest real
+      // equivalent (e.g. 'invoice', 'customer', 'user').
+      query = query.eq('entityType', params.module);
     }
 
-    return paginate<any>(query, page, limit);
+    const result = await paginate<any>(query, page, limit);
+    return { ...result, data: result.data.map(transformAuditLog) };
   },
+
 
   async getAuditLogStats(): Promise<any> {
     const companyId = await getCurrentCompanyId();

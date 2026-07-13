@@ -5,7 +5,7 @@ export type PaymentLinkStatus = 'pending' | 'paid' | 'failed' | 'expired';
 export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
 export type CommunicationChannel = 'whatsapp' | 'email' | 'sms';
 export type CommunicationStatus = 'sent' | 'delivered' | 'read' | 'failed';
-export type UserRole = 'admin' | 'business' | 'manager' | 'staff' | 'viewer';
+export type UserRole = 'admin' | 'business' | 'manager' | 'staff' | 'viewer' | 'super_admin';
 export type UserStatus = 'active' | 'suspended' | 'invited';
 export type GatewayType = 'razorpay' | 'paytm';
 export type GatewayStatus = 'connected' | 'disconnected';
@@ -72,6 +72,13 @@ export interface LineItem {
   discount: number;
   taxRate: number;
   amount: number;
+  /** Phase 5: GST split, computed at create/update time from company vs.
+   *  customer state (see src/utils/gst.ts). Intra-state -> cgst+sgst;
+   *  inter-state -> igst. Always present (defaults to 0) once read back
+   *  from the database. */
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
 }
 
 export interface Invoice {
@@ -226,9 +233,40 @@ export interface CommunicationSettings {
 export interface GatewaySettings {
   razorpay: {
     status: GatewayStatus;
+    keyId?: string;
+    /** Masked preview only, e.g. "••••••••3f9a" — never the real secret. */
+    keySecretPreview?: string | null;
+    webhookSecret?: string;
+    upiId?: string;
   };
   paytm: {
     status: GatewayStatus;
+    merchantId?: string;
+    /** Masked preview only, e.g. "••••••••3f9a" — never the real secret. */
+    merchantKeyPreview?: string | null;
+    environment?: 'TEST' | 'PROD';
+    upiId?: string;
+  };
+}
+
+/** Payload for updating gateway credentials — sent to the
+ *  save-gateway-credentials Edge Function, never written to the table
+ *  directly. `keySecret`/`merchantKey` are the plaintext NEW secret and are
+ *  optional: omit them to leave the currently-stored secret untouched. */
+export interface GatewayCredentialsUpdate {
+  razorpay?: {
+    status?: GatewayStatus;
+    keyId?: string;
+    keySecret?: string;
+    webhookSecret?: string;
+    upiId?: string;
+  };
+  paytm?: {
+    status?: GatewayStatus;
+    merchantId?: string;
+    merchantKey?: string;
+    environment?: 'TEST' | 'PROD';
+    upiId?: string;
   };
 }
 

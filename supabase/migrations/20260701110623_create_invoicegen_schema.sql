@@ -1,25 +1,3 @@
-/*
-# InvoiceGen Enterprise Schema
-
-## Overview
-Full multi-tenant SaaS invoice management schema.
-
-## New Tables
-All core tables for companies, users, auth, customers, invoices, payments, communication, templates, integrations, reporting, and admin.
-
-## Security
-RLS enabled on all tables. Policies use `TO anon, authenticated` with `USING (true)` since this backend is accessed via a custom Express API with its own JWT auth — not directly from the Supabase client. The Express API uses the service role key which bypasses RLS.
-
-## Notes
-- All IDs are uuid with gen_random_uuid()
-- Soft deletes via deletedAt columns
-- Multi-tenant isolation via companyId foreign keys
-*/
-
--- ============================================
--- ENUMS
--- ============================================
-
 DO $$ BEGIN
   CREATE TYPE "UserRole" AS ENUM ('ADMIN','MANAGER','STAFF','BUSINESS','VIEWER');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -108,9 +86,7 @@ DO $$ BEGIN
   CREATE TYPE "RecurringFrequency" AS ENUM ('DAILY','WEEKLY','MONTHLY','QUARTERLY','YEARLY');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- ============================================
 -- COMPANIES
--- ============================================
 
 CREATE TABLE IF NOT EXISTS companies (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -145,9 +121,7 @@ ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_companies" ON companies;
 CREATE POLICY "service_all_companies" ON companies FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- USERS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS users (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -180,9 +154,7 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_users" ON users;
 CREATE POLICY "service_all_users" ON users FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- SESSIONS & AUTH TOKENS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS sessions (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -285,9 +257,7 @@ ALTER TABLE trusted_devices ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_td" ON trusted_devices;
 CREATE POLICY "service_all_td" ON trusted_devices FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- COMPANY SETTINGS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS bank_info (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -376,9 +346,7 @@ ALTER TABLE company_settings ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_cset" ON company_settings;
 CREATE POLICY "service_all_cset" ON company_settings FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- CUSTOMERS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS customers (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -419,9 +387,7 @@ ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_cust" ON customers;
 CREATE POLICY "service_all_cust" ON customers FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- INVOICES
--- ============================================
 
 CREATE TABLE IF NOT EXISTS invoices (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -505,9 +471,7 @@ ALTER TABLE invoice_activities ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_ia" ON invoice_activities;
 CREATE POLICY "service_all_ia" ON invoice_activities FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- PAYMENT LINKS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS payment_links (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -539,9 +503,7 @@ ALTER TABLE payment_links ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_pl" ON payment_links;
 CREATE POLICY "service_all_pl" ON payment_links FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- PAYMENTS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS payments (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -567,9 +529,7 @@ ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_pay" ON payments;
 CREATE POLICY "service_all_pay" ON payments FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- COMMUNICATION
--- ============================================
 
 CREATE TABLE IF NOT EXISTS message_templates (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -615,9 +575,7 @@ ALTER TABLE communication_logs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_cl" ON communication_logs;
 CREATE POLICY "service_all_cl" ON communication_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- INVOICE TEMPLATES
--- ============================================
 
 CREATE TABLE IF NOT EXISTS invoice_templates (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -669,9 +627,7 @@ ALTER TABLE user_invoice_templates ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_uit" ON user_invoice_templates;
 CREATE POLICY "service_all_uit" ON user_invoice_templates FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- ACTIVITY & AUDIT LOGS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS activity_logs (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -713,9 +669,7 @@ ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_audlog" ON audit_logs;
 CREATE POLICY "service_all_audlog" ON audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- MODULES
--- ============================================
 
 CREATE TABLE IF NOT EXISTS module_configs (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -732,9 +686,7 @@ ALTER TABLE module_configs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_mc" ON module_configs;
 CREATE POLICY "service_all_mc" ON module_configs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- INTEGRATIONS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS external_integrations (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -755,9 +707,7 @@ ALTER TABLE external_integrations ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_ei" ON external_integrations;
 CREATE POLICY "service_all_ei" ON external_integrations FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- REPORTS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS saved_reports (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -796,9 +746,7 @@ ALTER TABLE export_history ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_eh" ON export_history;
 CREATE POLICY "service_all_eh" ON export_history FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- NOTIFICATIONS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS notifications (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -818,9 +766,7 @@ ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_notif" ON notifications;
 CREATE POLICY "service_all_notif" ON notifications FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- API KEYS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS api_keys (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -840,9 +786,7 @@ ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_ak" ON api_keys;
 CREATE POLICY "service_all_ak" ON api_keys FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- TAX CONFIGURATIONS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS tax_configurations (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -860,9 +804,7 @@ ALTER TABLE tax_configurations ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_tc" ON tax_configurations;
 CREATE POLICY "service_all_tc" ON tax_configurations FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
 -- COUPONS
--- ============================================
 
 CREATE TABLE IF NOT EXISTS coupons (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -884,9 +826,8 @@ ALTER TABLE coupons ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "service_all_coupon" ON coupons;
 CREATE POLICY "service_all_coupon" ON coupons FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- ============================================
+
 -- RECURRING INVOICES
--- ============================================
 
 CREATE TABLE IF NOT EXISTS recurring_invoices (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),

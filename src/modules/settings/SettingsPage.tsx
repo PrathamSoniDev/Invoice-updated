@@ -10,14 +10,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FileUpload } from '@/components/common/FileUpload';
 import { EmptyState } from '@/components/common/EmptyState';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSettingsStore } from '@/store/settingsStore';
-import { Settings, Building2, Banknote, FileText, MessageSquare, CreditCard, Save, Check, Zap, Wallet, Plug, Loader2, AlertCircle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Settings, Building2, Banknote, FileText, MessageSquare, CreditCard, Save, Check, Zap, Wallet, Loader2, AlertCircle, Eye, EyeOff, ShieldCheck, Link2Off } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 
 export function SettingsPage() {
-  const navigate = useNavigate();
   const {
     company,
     bank,
@@ -35,6 +42,13 @@ export function SettingsPage() {
     error,
   } = useSettingsStore();
   const [activeTab, setActiveTab] = useState('company');
+
+  // Gateway connect dialog state
+  const [connectDialog, setConnectDialog] = useState<'razorpay' | 'paytm' | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [showSecret, setShowSecret] = useState(false);
+  const [razorpayForm, setRazorpayForm] = useState({ keyId: '', keySecret: '', webhookSecret: '', upiId: '' });
+  const [paytmForm, setPaytmForm] = useState({ merchantId: '', merchantKey: '', environment: 'TEST' as 'TEST' | 'PROD', upiId: '' });
 
   useEffect(() => {
     if (!isInitialized && !isLoading) {
@@ -55,14 +69,92 @@ export function SettingsPage() {
     </Card>
   );
 
-  const handleGatewayToggle = async (gw: 'razorpay' | 'paytm') => {
-    if (!gateways) return;
-    const current = gateways[gw].status;
-    const newStatus = current === 'connected' ? 'disconnected' : 'connected';
+  const openConnectDialog = (gw: 'razorpay' | 'paytm') => {
+    setShowSecret(false);
+    // IMPORTANT: the secret field is left BLANK when opening the dialog to
+    // manage an already-connected gateway. gateways.*.keySecretPreview /
+    // merchantKeyPreview only ever hold a masked preview (e.g. "••••3f9a")
+    // — never the real secret — so there's nothing to prefill. Leaving the
+    // field blank and only sending it up if the user types a new value is
+    // what lets "Manage" update the Key ID/webhook/UPI fields without
+    // forcing the user to re-enter (or accidentally overwrite with the
+    // masked placeholder) a secret they aren't changing.
+    if (gw === 'razorpay') {
+      setRazorpayForm({
+        keyId: gateways?.razorpay.keyId || '',
+        keySecret: '',
+        webhookSecret: gateways?.razorpay.webhookSecret || '',
+        upiId: gateways?.razorpay.upiId || bank?.upiId || '',
+      });
+    } else {
+      setPaytmForm({
+        merchantId: gateways?.paytm.merchantId || '',
+        merchantKey: '',
+        environment: gateways?.paytm.environment || 'TEST',
+        upiId: gateways?.paytm.upiId || bank?.upiId || '',
+      });
+    }
+    setConnectDialog(gw);
+  };
 
+  const handleRazorpayConnect = async () => {
+    const alreadyConnected = gateways?.razorpay.status === 'connected';
+    // A secret is required the first time; once connected, it's optional —
+    // leaving it blank just means "keep the existing secret".
+    if (!razorpayForm.keyId.trim() || (!alreadyConnected && !razorpayForm.keySecret.trim())) {
+      toast.error('Key ID and Key Secret are required');
+      return;
+    }
+    setIsConnecting(true);
     try {
-      await updateGateways({ [gw]: { status: newStatus } } as Partial<typeof gateways>);
-      toast.success(`${gw === 'razorpay' ? 'Razorpay' : 'Paytm Business'} ${newStatus === 'connected' ? 'connected' : 'disconnected'}`);
+      await updateGateways({
+        razorpay: {
+          status: 'connected',
+          keyId: razorpayForm.keyId,
+          webhookSecret: razorpayForm.webhookSecret,
+          upiId: razorpayForm.upiId,
+          ...(razorpayForm.keySecret.trim() ? { keySecret: razorpayForm.keySecret.trim() } : {}),
+        },
+      });
+      toast.success('Razorpay connected successfully');
+      setConnectDialog(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Unable to connect Razorpay');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handlePaytmConnect = async () => {
+    const alreadyConnected = gateways?.paytm.status === 'connected';
+    if (!paytmForm.merchantId.trim() || (!alreadyConnected && !paytmForm.merchantKey.trim())) {
+      toast.error('Merchant ID and Merchant Key are required');
+      return;
+    }
+    setIsConnecting(true);
+    try {
+      await updateGateways({
+        paytm: {
+          status: 'connected',
+          merchantId: paytmForm.merchantId,
+          environment: paytmForm.environment,
+          upiId: paytmForm.upiId,
+          ...(paytmForm.merchantKey.trim() ? { merchantKey: paytmForm.merchantKey.trim() } : {}),
+        },
+      });
+      toast.success('Paytm Business connected successfully');
+      setConnectDialog(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Unable to connect Paytm Business');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleGatewayDisconnect = async (gw: 'razorpay' | 'paytm') => {
+    try {
+      await updateGateways({ [gw]: { status: 'disconnected' } });
+      toast.success(`${gw === 'razorpay' ? 'Razorpay' : 'Paytm Business'} disconnected`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Unable to update gateway settings');
     }
@@ -93,13 +185,13 @@ export function SettingsPage() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 h-auto">
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 h-auto">
           <TabsTrigger value="company" className="gap-1.5"><Building2 className="h-3.5 w-3.5" /> Company</TabsTrigger>
           <TabsTrigger value="bank" className="gap-1.5"><Banknote className="h-3.5 w-3.5" /> Bank</TabsTrigger>
           <TabsTrigger value="invoice" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Invoice</TabsTrigger>
           <TabsTrigger value="communication" className="gap-1.5"><MessageSquare className="h-3.5 w-3.5" /> Comms</TabsTrigger>
           <TabsTrigger value="gateways" className="gap-1.5"><CreditCard className="h-3.5 w-3.5" /> Gateways</TabsTrigger>
-          <TabsTrigger value="integrations" className="gap-1.5" onClick={() => navigate('/settings/external-integrations')}><Plug className="h-3.5 w-3.5" /> Integrations</TabsTrigger>
+          {/* 'Integrations' tab removed — External Integrations page is disabled */}
         </TabsList>
 
         {/* Company Info */}
@@ -365,9 +457,17 @@ export function SettingsPage() {
                       )}
                     </div>
                     {gateways.razorpay.status === 'connected' ? (
-                      <Button variant="outline" className="w-full" onClick={() => handleGatewayToggle('razorpay')}>Disconnect</Button>
+                      <div className="w-full space-y-2">
+                        <p className="text-xs text-muted-foreground font-mono">Key ID: {gateways.razorpay.keyId ? `${gateways.razorpay.keyId.slice(0, 8)}••••` : '—'}</p>
+                        <div className="flex gap-2">
+                          <Button variant="outline" className="flex-1" onClick={() => openConnectDialog('razorpay')}>Manage</Button>
+                          <Button variant="outline" className="flex-1 gap-1.5 text-destructive hover:text-destructive" onClick={() => handleGatewayDisconnect('razorpay')}>
+                            <Link2Off className="h-3.5 w-3.5" /> Disconnect
+                          </Button>
+                        </div>
+                      </div>
                     ) : (
-                      <Button className="w-full gap-2" onClick={() => handleGatewayToggle('razorpay')}>
+                      <Button className="w-full gap-2" onClick={() => openConnectDialog('razorpay')}>
                         <Zap className="h-4 w-4" /> Connect
                       </Button>
                     )}
@@ -396,9 +496,17 @@ export function SettingsPage() {
                       )}
                     </div>
                     {gateways.paytm.status === 'connected' ? (
-                      <Button variant="outline" className="w-full" onClick={() => handleGatewayToggle('paytm')}>Disconnect</Button>
+                      <div className="w-full space-y-2">
+                        <p className="text-xs text-muted-foreground font-mono">MID: {gateways.paytm.merchantId ? `${gateways.paytm.merchantId.slice(0, 8)}••••` : '—'}</p>
+                        <div className="flex gap-2">
+                          <Button variant="outline" className="flex-1" onClick={() => openConnectDialog('paytm')}>Manage</Button>
+                          <Button variant="outline" className="flex-1 gap-1.5 text-destructive hover:text-destructive" onClick={() => handleGatewayDisconnect('paytm')}>
+                            <Link2Off className="h-3.5 w-3.5" /> Disconnect
+                          </Button>
+                        </div>
+                      </div>
                     ) : (
-                      <Button className="w-full gap-2" onClick={() => handleGatewayToggle('paytm')}>
+                      <Button className="w-full gap-2" onClick={() => openConnectDialog('paytm')}>
                         <Wallet className="h-4 w-4" /> Connect
                       </Button>
                     )}
@@ -411,6 +519,190 @@ export function SettingsPage() {
           {!gateways && renderSectionEmpty('Payment gateway')}
         </TabsContent>
       </Tabs>
+
+      {/* Razorpay Connect Dialog */}
+      <Dialog open={connectDialog === 'razorpay'} onOpenChange={(open) => !open && setConnectDialog(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3 mb-1">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-info/10">
+                <Zap className="h-5 w-5 text-info" />
+              </div>
+              <DialogTitle>Connect Razorpay</DialogTitle>
+            </div>
+            <DialogDescription>
+              Enter your Razorpay API credentials to start accepting cards, UPI, netbanking, and wallet payments.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Key ID <span className="text-destructive">*</span></Label>
+              <Input
+                placeholder="rzp_live_XXXXXXXXXXXX"
+                className="font-mono"
+                value={razorpayForm.keyId}
+                onChange={(e) => setRazorpayForm((f) => ({ ...f, keyId: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>
+                Key Secret {gateways?.razorpay.status !== 'connected' && <span className="text-destructive">*</span>}
+              </Label>
+              <div className="relative">
+                <Input
+                  type={showSecret ? 'text' : 'password'}
+                  placeholder={
+                    gateways?.razorpay.status === 'connected'
+                      ? `Currently ${gateways.razorpay.keySecretPreview || '••••••••'} — leave blank to keep`
+                      : 'Enter your secret key'
+                  }
+                  className="font-mono pr-10"
+                  value={razorpayForm.keySecret}
+                  onChange={(e) => setRazorpayForm((f) => ({ ...f, keySecret: e.target.value }))}
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowSecret((s) => !s)}
+                  tabIndex={-1}
+                >
+                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {gateways?.razorpay.status === 'connected' && (
+                <p className="text-xs text-muted-foreground">Only enter a value here to replace the stored secret. We never display the full secret once saved.</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Webhook Secret <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input
+                placeholder="Used to verify payment webhook signatures"
+                className="font-mono"
+                value={razorpayForm.webhookSecret}
+                onChange={(e) => setRazorpayForm((f) => ({ ...f, webhookSecret: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Settlement UPI ID <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input
+                placeholder="yourbusiness@okhdfcbank"
+                value={razorpayForm.upiId}
+                onChange={(e) => setRazorpayForm((f) => ({ ...f, upiId: e.target.value }))}
+              />
+              <p className="text-xs text-muted-foreground">UPI ID payouts and settlements will be linked to, in addition to your bank account.</p>
+            </div>
+            <Alert>
+              <ShieldCheck className="h-4 w-4" />
+              <AlertDescription className="text-xs">
+                Credentials are stored securely and are only used to process payments on your behalf. Card details are never entered here — Razorpay's hosted checkout collects them directly from your customers.
+              </AlertDescription>
+            </Alert>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConnectDialog(null)}>Cancel</Button>
+            <Button onClick={handleRazorpayConnect} disabled={isConnecting} className="gap-2">
+              {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+              {isConnecting ? 'Connecting...' : 'Connect Razorpay'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Paytm Business Connect Dialog */}
+      <Dialog open={connectDialog === 'paytm'} onOpenChange={(open) => !open && setConnectDialog(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3 mb-1">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-warning/10">
+                <Wallet className="h-5 w-5 text-warning" />
+              </div>
+              <DialogTitle>Connect Paytm Business</DialogTitle>
+            </div>
+            <DialogDescription>
+              Enter your Paytm merchant credentials from the Paytm Business Dashboard to accept UPI, cards, and wallet payments.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Merchant ID (MID) <span className="text-destructive">*</span></Label>
+              <Input
+                placeholder="e.g. YourBiz12345678901234"
+                className="font-mono"
+                value={paytmForm.merchantId}
+                onChange={(e) => setPaytmForm((f) => ({ ...f, merchantId: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>
+                Merchant Key {gateways?.paytm.status !== 'connected' && <span className="text-destructive">*</span>}
+              </Label>
+              <div className="relative">
+                <Input
+                  type={showSecret ? 'text' : 'password'}
+                  placeholder={
+                    gateways?.paytm.status === 'connected'
+                      ? `Currently ${gateways.paytm.merchantKeyPreview || '••••••••'} — leave blank to keep`
+                      : 'Enter your merchant key'
+                  }
+                  className="font-mono pr-10"
+                  value={paytmForm.merchantKey}
+                  onChange={(e) => setPaytmForm((f) => ({ ...f, merchantKey: e.target.value }))}
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowSecret((s) => !s)}
+                  tabIndex={-1}
+                >
+                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {gateways?.paytm.status === 'connected' && (
+                <p className="text-xs text-muted-foreground">Only enter a value here to replace the stored key. We never display the full key once saved.</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Environment</Label>
+              <Select
+                value={paytmForm.environment}
+                onValueChange={(v) => setPaytmForm((f) => ({ ...f, environment: v as 'TEST' | 'PROD' }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TEST">Test / Staging</SelectItem>
+                  <SelectItem value="PROD">Production</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Business UPI ID <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input
+                placeholder="yourbusiness@paytm"
+                value={paytmForm.upiId}
+                onChange={(e) => setPaytmForm((f) => ({ ...f, upiId: e.target.value }))}
+              />
+              <p className="text-xs text-muted-foreground">Used for direct UPI collect requests and settlement reconciliation.</p>
+            </div>
+            <Alert>
+              <ShieldCheck className="h-4 w-4" />
+              <AlertDescription className="text-xs">
+                Credentials are stored securely and are only used to process payments on your behalf. Card details are never entered here — Paytm's hosted checkout collects them directly from your customers.
+              </AlertDescription>
+            </Alert>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConnectDialog(null)}>Cancel</Button>
+            <Button onClick={handlePaytmConnect} disabled={isConnecting} className="gap-2">
+              {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
+              {isConnecting ? 'Connecting...' : 'Connect Paytm Business'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
