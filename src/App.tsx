@@ -16,6 +16,7 @@ const DashboardPage = lazy(() => import('@/modules/dashboard/DashboardPage').the
 const CustomerListPage = lazy(() => import('@/modules/customers/CustomerListPage').then((m) => ({ default: m.CustomerListPage })));
 const CustomerDetailsPage = lazy(() => import('@/modules/customers/CustomerDetailsPage').then((m) => ({ default: m.CustomerDetailsPage })));
 const CustomerFormPage = lazy(() => import('@/modules/customers/CustomerFormPage').then((m) => ({ default: m.CustomerFormPage })));
+const NotificationsPage = lazy(() => import("@/modules/notifications/NotificationsPage").then((m) => ({default: m.NotificationsPage })));
 const InvoiceListPage = lazy(() => import('@/modules/invoices/InvoiceListPage').then((m) => ({ default: m.InvoiceListPage })));
 const InvoiceCreatePage = lazy(() => import('@/modules/invoices/InvoiceCreatePage').then((m) => ({ default: m.InvoiceCreatePage })));
 const InvoiceDetailsPage = lazy(() => import('@/modules/invoices/InvoiceDetailsPage').then((m) => ({ default: m.InvoiceDetailsPage })));
@@ -73,6 +74,9 @@ export default function App() {
               <Route path="/customers/new" element={<ProtectedRoute module="customers"><CustomerFormPage /></ProtectedRoute>} />
               <Route path="/customers/:id" element={<ProtectedRoute module="customers"><CustomerDetailsPage /></ProtectedRoute>} />
               <Route path="/customers/:id/edit" element={<ProtectedRoute module="customers"><CustomerFormPage /></ProtectedRoute>} />
+
+              {/* Invoices */}
+              <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>}/>
 
               {/* Invoices */}
               <Route path="/invoices" element={<ProtectedRoute module="invoices"><InvoiceListPage /></ProtectedRoute>} />
