@@ -156,7 +156,10 @@ export interface MessageTemplate {
   subject: string;
   body: string;
   variables: string[];
+  isDefault: boolean;
+  isActive: boolean;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface ActivityLog {
