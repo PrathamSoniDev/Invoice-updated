@@ -42,6 +42,7 @@ export function TopNavbar() {
       setNotifications(data);
     } catch (err) {
       console.error(err);
+      toast.error("Failed to load notification");
     }
   }
 
