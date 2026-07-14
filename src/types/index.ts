@@ -1,24 +1,36 @@
 export type ID = string;
 
-export type InvoiceStatus = 'draft' | 'sent' | 'viewed' | 'paid' | 'overdue' | 'cancelled';
-export type PaymentLinkStatus = 'pending' | 'paid' | 'failed' | 'expired';
-export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
-export type CommunicationChannel = 'whatsapp' | 'email' | 'sms';
-export type CommunicationStatus = 'sent' | 'delivered' | 'read' | 'failed';
-export type UserRole = 'admin' | 'business' | 'manager' | 'staff' | 'viewer' | 'super_admin';
-export type UserStatus = 'active' | 'suspended' | 'invited';
-export type GatewayType = 'razorpay' | 'paytm';
-export type GatewayStatus = 'connected' | 'disconnected';
+export type InvoiceStatus =
+  | "draft"
+  | "sent"
+  | "viewed"
+  | "paid"
+  | "overdue"
+  | "cancelled";
+export type PaymentLinkStatus = "pending" | "paid" | "failed" | "expired";
+export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
+export type CommunicationChannel = "whatsapp" | "email" | "sms";
+export type CommunicationStatus = "sent" | "delivered" | "read" | "failed";
+export type UserRole =
+  | "admin"
+  | "business"
+  | "manager"
+  | "staff"
+  | "viewer"
+  | "super_admin";
+export type UserStatus = "active" | "suspended" | "invited";
+export type GatewayType = "razorpay" | "paytm";
+export type GatewayStatus = "connected" | "disconnected";
 export type ModuleKey =
-  | 'dashboard'
-  | 'customers'
-  | 'invoices'
-  | 'payment-links'
-  | 'whatsapp'
-  | 'email'
-  | 'reports'
-  | 'settings'
-  | 'admin';
+  | "dashboard"
+  | "customers"
+  | "invoices"
+  | "payment-links"
+  | "whatsapp"
+  | "email"
+  | "reports"
+  | "settings"
+  | "admin";
 
 export interface User {
   id: ID;
@@ -47,7 +59,7 @@ export interface Customer {
   billingAddress: Address;
   shippingAddress: Address;
   notes?: string;
-  status: 'active' | 'inactive';
+  status: "active" | "inactive";
   totalInvoices: number;
   totalRevenue: number;
   outstandingAmount: number;
@@ -126,7 +138,7 @@ export interface Payment {
   customerId: ID;
   customerName: string;
   amount: number;
-  method: 'card' | 'upi' | 'netbanking' | 'wallet' | 'cash' | 'cheque';
+  method: "card" | "upi" | "netbanking" | "wallet" | "cash" | "cheque";
   status: PaymentStatus;
   gateway?: GatewayType;
   transactionId: string;
@@ -146,7 +158,7 @@ export interface CommunicationLog {
   sentAt: string;
   deliveredAt?: string;
   readAt?: string;
-  relatedTo?: { type: 'invoice' | 'payment' | 'customer'; id: ID };
+  relatedTo?: { type: "invoice" | "payment" | "customer"; id: ID };
 }
 
 export interface MessageTemplate {
@@ -179,7 +191,14 @@ export interface AuditLog {
   userId: ID;
   userName: string;
   userRole: UserRole;
-  action: 'create' | 'update' | 'delete' | 'login' | 'logout' | 'export' | 'settings';
+  action:
+    | "create"
+    | "update"
+    | "delete"
+    | "login"
+    | "logout"
+    | "export"
+    | "settings";
   module: string;
   entityId: ID;
   entityName: string;
@@ -247,7 +266,7 @@ export interface GatewaySettings {
     merchantId?: string;
     /** Masked preview only, e.g. "••••••••3f9a" — never the real secret. */
     merchantKeyPreview?: string | null;
-    environment?: 'TEST' | 'PROD';
+    environment?: "TEST" | "PROD";
     upiId?: string;
   };
 }
@@ -268,7 +287,7 @@ export interface GatewayCredentialsUpdate {
     status?: GatewayStatus;
     merchantId?: string;
     merchantKey?: string;
-    environment?: 'TEST' | 'PROD';
+    environment?: "TEST" | "PROD";
     upiId?: string;
   };
 }
@@ -343,8 +362,8 @@ export interface StorageUsagePoint {
 }
 
 // ========== INVOICE TEMPLATES ==========
-export type TemplateType = 'tsx' | 'html' | 'json';
-export type TemplateStatus = 'active' | 'disabled' | 'draft';
+export type TemplateType = "tsx" | "html" | "json";
+export type TemplateStatus = "active" | "disabled" | "draft";
 
 export interface InvoiceTemplate {
   id: ID;
@@ -388,16 +407,20 @@ export interface UserInvoiceTemplate {
 
 // ========== EXTERNAL INTEGRATIONS ==========
 export type IntegrationProvider =
-  | 'tally'
-  | 'busy'
-  | 'zoho_books'
-  | 'marg'
-  | 'sap'
-  | 'dynamics'
-  | 'quickbooks'
-  | 'xero';
+  | "tally"
+  | "busy"
+  | "zoho_books"
+  | "marg"
+  | "sap"
+  | "dynamics"
+  | "quickbooks"
+  | "xero";
 
-export type IntegrationStatus = 'connected' | 'disconnected' | 'error' | 'pending';
+export type IntegrationStatus =
+  | "connected"
+  | "disconnected"
+  | "error"
+  | "pending";
 
 export interface ExternalIntegration {
   id: ID;
@@ -428,7 +451,7 @@ export interface ExternalIntegration {
 export interface IntegrationLog {
   id: ID;
   integrationId: ID;
-  level: 'info' | 'warn' | 'error';
+  level: "info" | "warn" | "error";
   message: string;
   details?: Record<string, unknown>;
   createdAt: string;
@@ -437,11 +460,34 @@ export interface IntegrationLog {
 export interface SyncHistory {
   id: ID;
   integrationId: ID;
-  syncType: 'manual' | 'scheduled';
+  syncType: "manual" | "scheduled";
   entityType: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: "pending" | "running" | "completed" | "failed";
   recordsCount: number;
   errorMessage?: string;
   startedAt: string;
   completedAt?: string;
+}
+
+// ========== NOTIFICATIONS ==========
+
+export type NotificationType =
+  | "payment_received"
+  | "invoice_paid"
+  | "invoice_overdue"
+  | "customer_created"
+  | "payment_failed"
+  | "settings_updated";
+
+export interface Notification {
+  id: ID;
+  companyId: ID;
+  userId?: ID;
+  type: NotificationType;
+  title: string;
+  message: string;
+  isRead: boolean;
+  readAt?: string;
+  createdAt: string;
+  data?: Record<string, unknown>;
 }

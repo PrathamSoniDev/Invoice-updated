@@ -20,7 +20,6 @@ import { formatDate } from "@/utils";
 import { toast } from "sonner";
 
 export function NotificationsPage() {
-
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -72,8 +71,8 @@ export function NotificationsPage() {
                 isRead: true,
                 readAt: new Date().toISOString(),
               }
-            : item
-        )
+            : item,
+        ),
       );
 
       toast.success("Notification marked as read");
@@ -91,9 +90,7 @@ export function NotificationsPage() {
         <div className="space-y-1">
           <p className="font-medium">{row.title}</p>
 
-          <p className="text-sm text-muted-foreground">
-            {row.message}
-          </p>
+          <p className="text-sm text-muted-foreground">{row.message}</p>
         </div>
       ),
     },
@@ -103,9 +100,7 @@ export function NotificationsPage() {
       header: "Category",
 
       cell: (row) => (
-        <Badge variant="outline">
-          {row.type.replace("_", " ")}
-        </Badge>
+        <Badge variant="outline">{row.type.replace("_", " ")}</Badge>
       ),
     },
 
@@ -117,9 +112,7 @@ export function NotificationsPage() {
         row.isRead ? (
           <Badge>Read</Badge>
         ) : (
-          <Badge variant="secondary">
-            Unread
-          </Badge>
+          <Badge variant="secondary">Unread</Badge>
         ),
     },
 
@@ -128,9 +121,7 @@ export function NotificationsPage() {
       header: "Created",
 
       cell: (row) => (
-        <span className="text-sm">
-          {formatDate(row.createdAt, "short")}
-        </span>
+        <span className="text-sm">{formatDate(row.createdAt, "short")}</span>
       ),
     },
 
@@ -154,7 +145,7 @@ export function NotificationsPage() {
       ),
     },
   ];
-  
+
   return (
     <div className="space-y-6">
       <PageHeader
