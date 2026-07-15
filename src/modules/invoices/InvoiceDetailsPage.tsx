@@ -5,22 +5,42 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { InvoiceStatusBadge } from '@/components/common/StatusBadge';
+import { PaymentGatewayDialog } from '@/components/payments/PaymentGatewayDialog';
 import { invoiceService } from '@/services/invoiceService';
+import { customerService } from '@/services/customerService';
 import { sendInvoiceEmail } from '@/services/emailService';
+import { initiatePaytmCheckout, buildPaytmOrderId } from '@/services/paytmClient';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useModuleStore } from '@/store/moduleStore';
-import type { Invoice } from '@/types';
+import type { Invoice, GatewayType, Customer } from '@/types';
 import { formatCurrency, formatDate, getInitials } from '@/utils';
+import { printInvoicePDF } from '@/utils/invoicePdf';
+import { summarizeGst } from '@/utils/gst';
 import { FileText, Edit, Download, Printer, Copy, Mail, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import axios from "axios";
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
+interface RazorpayResponse {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+}
 export function InvoiceDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
   const [sendingEmail, setSendingEmail] = useState(false);
-  const { company } = useSettingsStore();
+  const [gatewayDialogOpen, setGatewayDialogOpen] = useState(false);
+  const { company, bank } = useSettingsStore();
   const { isModuleEnabled } = useModuleStore();
 
   const emailEnabled = isModuleEnabled('email');
@@ -30,6 +50,13 @@ export function InvoiceDetailsPage() {
     invoiceService.get(id!).then((inv) => {
       setInvoice(inv);
       setLoading(false);
+      // Best-effort: the PDF template is richer with full customer details
+      // (billing address, GSTIN) than what's denormalized onto the invoice
+      // row. If this fails, buildInvoicePDFHTML() falls back to the
+      // invoice's own customerName/customerEmail fields.
+      customerService.get(inv.customerId).then(setCustomer).catch((err) => {
+        console.error('[InvoiceDetailsPage] failed to load customer for PDF:', err);
+      });
     });
   }, [id]);
 
@@ -72,8 +99,89 @@ export function InvoiceDetailsPage() {
     }
   };
 
+  const handlePayRazorpay = async () => {
+    if (!invoice) return;
+    const { data: order } = await axios.post(
+      `${API_URL}/payment/create-order`,
+      { amount: invoice.total, invoiceId: invoice.id }
+    );
+
+    const options = {
+      key: import.meta.env.VITE_RAZORPAY_KEY,
+      amount: order.amount,
+      currency: "INR",
+      name: "Invoice System",
+      order_id: order.id,
+      handler: async (response: RazorpayResponse) => {
+        try {
+          await axios.post(`${API_URL}/payment/verify`, response);
+          // The server reconciles the payment (payments row + invoice
+          // status/balance) inline before /verify responds, on the same
+          // code path the /api/webhooks/razorpay webhook uses — see
+          // server/services/reconciliationService.js. Refetch rather than
+          // writing to the database from the client here: that also closes
+          // a gap where a tampered client request could previously claim an
+          // arbitrary invoiceId was paid regardless of what was actually paid for.
+          const updatedInvoice = await invoiceService.get(invoice.id);
+          setInvoice(updatedInvoice);
+          if (updatedInvoice.status === 'paid') {
+            toast.success('Payment successful');
+          } else {
+            toast.success('Payment received — finalizing shortly. Refresh if the status doesn\'t update.');
+          }
+        } catch (error) {
+          console.error('[InvoiceDetailsPage] Razorpay verify failed:', error);
+          toast.error('Payment completed but confirmation failed. Refresh in a moment — the webhook will reconcile it shortly.');
+        }
+      },
+    };
+
+    const payment = new window.Razorpay(options);
+    payment.open();
+  };
+
+  const handlePayPaytm = async () => {
+    if (!invoice) return;
+    try {
+      await initiatePaytmCheckout({
+        amount: invoice.total,
+        orderId: buildPaytmOrderId('invoice', invoice.id),
+        customerId: invoice.customerId,
+      });
+      // initiatePaytmCheckout submits a form and navigates the browser away
+      // to Paytm's hosted payment page — nothing to do here after this;
+      // the result is handled by PaytmReturnPage once Paytm redirects back.
+    } catch (error) {
+      console.error('[InvoiceDetailsPage] Paytm initiation failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to start Paytm payment');
+    }
+  };
+
+  const handleGatewaySelect = (gateway: GatewayType) => {
+    setGatewayDialogOpen(false);
+    if (gateway === 'razorpay') {
+      handlePayRazorpay();
+    } else {
+      handlePayPaytm();
+    }
+  };
+
+  // Both "Download PDF" and "Print" open the same rendered invoice in a new
+  // tab and trigger window.print() — the browser's print dialog's "Save as
+  // PDF" destination is what actually produces the downloadable file. This
+  // mirrors the working pattern in src/utils/reportExport.ts (exportPDF),
+  // but with a dedicated invoice template (see src/utils/invoicePdf.ts)
+  // instead of the generic tabular report layout.
+  const handleDownloadOrPrintPDF = () => {
+    if (!invoice) return;
+    printInvoicePDF(invoice, company, customer, bank);
+  };
+
   if (loading) return <div className="py-16 text-center text-muted-foreground">Loading invoice...</div>;
   if (!invoice) return <div className="py-16 text-center text-muted-foreground">Invoice not found</div>;
+
+  const gst = summarizeGst(invoice.lineItems);
+  const hasGstBreakdown = gst.cgstAmount + gst.sgstAmount + gst.igstAmount > 0;
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -84,10 +192,10 @@ export function InvoiceDetailsPage() {
         icon={FileText}
         actions={
           <>
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.info('Print dialog would open')}>
+            <Button variant="outline" size="sm" className="gap-2" onClick={handleDownloadOrPrintPDF}>
               <Printer className="h-4 w-4" /> Print
             </Button>
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.success('Invoice PDF downloaded')}>
+            <Button variant="outline" size="sm" className="gap-2" onClick={handleDownloadOrPrintPDF}>
               <Download className="h-4 w-4" /> Download PDF
             </Button>
             <Button size="sm" className="gap-2" onClick={() => navigate(`/invoices/${invoice.id}/edit`)}>
@@ -119,8 +227,22 @@ export function InvoiceDetailsPage() {
               <MessageCircle className="h-4 w-4" /> WhatsApp
             </Button>
           )}
+           {invoice.status !== "paid" && (
+        <Button
+        size="sm"
+          className="gap-2 bg-green-600 hover:bg-green-700"
+          onClick={() => setGatewayDialogOpen(true)}> Pay Now
+          </Button>
+          )}
         </div>
       </div>
+
+      <PaymentGatewayDialog
+        open={gatewayDialogOpen}
+        onOpenChange={setGatewayDialogOpen}
+        amount={invoice.total}
+        onSelect={handleGatewaySelect}
+      />
 
       {/* Invoice Preview */}
       <Card className="shadow-card overflow-hidden">
@@ -201,10 +323,33 @@ export function InvoiceDetailsPage() {
                 <span className="text-muted-foreground">Subtotal</span>
                 <span className="font-medium">{formatCurrency(invoice.subtotal)}</span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Tax</span>
-                <span className="font-medium">{formatCurrency(invoice.taxAmount)}</span>
-              </div>
+              {hasGstBreakdown ? (
+                <>
+                  {gst.cgstAmount > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">CGST</span>
+                      <span className="font-medium">{formatCurrency(gst.cgstAmount)}</span>
+                    </div>
+                  )}
+                  {gst.sgstAmount > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">SGST</span>
+                      <span className="font-medium">{formatCurrency(gst.sgstAmount)}</span>
+                    </div>
+                  )}
+                  {gst.igstAmount > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">IGST</span>
+                      <span className="font-medium">{formatCurrency(gst.igstAmount)}</span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Tax</span>
+                  <span className="font-medium">{formatCurrency(invoice.taxAmount)}</span>
+                </div>
+              )}
               {invoice.discountAmount > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Discount</span>

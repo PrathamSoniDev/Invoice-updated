@@ -2,6 +2,7 @@
 import { supabase } from '@/lib/supabase';
 import { getCurrentCompanyId, getCurrentUserId, paginate, logActivity, logAudit } from '@/lib/database';
 import type { Invoice, LineItem, InvoiceStatus } from '@/types';
+import { isIntraStateTransaction, computeGstBreakdown } from '@/utils/gst';
 
 interface InvoiceRow {
   id: string;
@@ -40,6 +41,9 @@ interface InvoiceItemRow {
   discount: string;
   taxRate: string;
   amount: string;
+  cgstAmount: string;
+  sgstAmount: string;
+  igstAmount: string;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -64,6 +68,9 @@ function transformItem(row: InvoiceItemRow): LineItem {
     discount: parseFloat(row.discount) || 0,
     taxRate: parseFloat(row.taxRate) || 0,
     amount: parseFloat(row.amount) || 0,
+    cgstAmount: parseFloat(row.cgstAmount) || 0,
+    sgstAmount: parseFloat(row.sgstAmount) || 0,
+    igstAmount: parseFloat(row.igstAmount) || 0,
   };
 }
 
@@ -100,6 +107,22 @@ async function fetchInvoiceItems(invoiceId: string): Promise<InvoiceItemRow[]> {
 
   if (error) throw error;
   return (data || []) as InvoiceItemRow[];
+}
+
+// Phase 5: GST auto-split. Looks up the company's registered state and the
+// target customer's billing state to decide whether line-item tax should
+// be split CGST+SGST (intra-state) or charged in full as IGST
+// (inter-state). See src/utils/gst.ts for the actual split math.
+async function resolveIsIntraState(companyId: string, customerId: string): Promise<boolean> {
+  const [{ data: company, error: companyError }, { data: customer, error: customerError }] = await Promise.all([
+    supabase.from('companies').select('state').eq('id', companyId).maybeSingle(),
+    supabase.from('customers').select('billingState').eq('id', customerId).maybeSingle(),
+  ]);
+
+  if (companyError) throw companyError;
+  if (customerError) throw customerError;
+
+  return isIntraStateTransaction(company?.state, customer?.billingState);
 }
 
 async function generateInvoiceNumber(): Promise<string> {
@@ -240,7 +263,12 @@ export const invoiceService = {
       discount: number;
       taxRate: number;
       amount: number;
+      cgstAmount: number;
+      sgstAmount: number;
+      igstAmount: number;
     }> = [];
+
+    const isIntraState = await resolveIsIntraState(companyId, input.customerId);
 
     for (const item of safeItems) {
       const qty = item.quantity || 1;
@@ -250,6 +278,7 @@ export const invoiceService = {
       const lineTotal = qty * rate - discount;
       const lineTax = lineTotal * (taxRate / 100);
       const amount = lineTotal + lineTax;
+      const { cgstAmount, sgstAmount, igstAmount } = computeGstBreakdown(lineTax, isIntraState);
 
       subtotal += lineTotal;
       taxAmount += lineTax;
@@ -260,6 +289,9 @@ export const invoiceService = {
         discount,
         taxRate,
         amount,
+        cgstAmount,
+        sgstAmount,
+        igstAmount,
       });
     }
 
@@ -314,6 +346,9 @@ export const invoiceService = {
         discount: item.discount,
         taxRate: item.taxRate,
         amount: item.amount,
+        cgstAmount: item.cgstAmount,
+        sgstAmount: item.sgstAmount,
+        igstAmount: item.igstAmount,
         sortOrder: i,
       });
 
@@ -410,7 +445,12 @@ export const invoiceService = {
         discount: number;
         taxRate: number;
         amount: number;
+        cgstAmount: number;
+        sgstAmount: number;
+        igstAmount: number;
       }> = [];
+
+      const isIntraState = await resolveIsIntraState(companyId, input.customerId || existing.customerId);
 
       for (const item of input.items) {
         const qty = item.quantity || 1;
@@ -420,6 +460,7 @@ export const invoiceService = {
         const lineTotal = qty * rate - discount;
         const lineTax = lineTotal * (taxRate / 100);
         const amount = lineTotal + lineTax;
+        const { cgstAmount, sgstAmount, igstAmount } = computeGstBreakdown(lineTax, isIntraState);
 
         subtotal += lineTotal;
         taxAmount += lineTax;
@@ -430,6 +471,9 @@ export const invoiceService = {
           discount,
           taxRate,
           amount,
+          cgstAmount,
+          sgstAmount,
+          igstAmount,
         });
       }
 
@@ -465,6 +509,9 @@ export const invoiceService = {
           discount: item.discount,
           taxRate: item.taxRate,
           amount: item.amount,
+          cgstAmount: item.cgstAmount,
+          sgstAmount: item.sgstAmount,
+          igstAmount: item.igstAmount,
           sortOrder: i,
         });
 

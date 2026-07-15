@@ -323,6 +323,7 @@ export const paymentService = {
     customerId: string;
     amount: number;
     method: string;
+    gateway?: 'razorpay' | 'paytm';
   }): Promise<Payment> {
     const companyId = await getCurrentCompanyId();
 
@@ -338,7 +339,7 @@ export const paymentService = {
         amount: input.amount,
         method: input.method.toUpperCase(),
         status: 'PAID',
-        gateway: input.paymentLinkId ? 'RAZORPAY' : null,
+        gateway: input.gateway ? input.gateway.toUpperCase() : (input.paymentLinkId ? 'RAZORPAY' : null),
         transactionId,
         date: new Date().toISOString(),
       })

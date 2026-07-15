@@ -16,7 +16,6 @@ const DashboardPage = lazy(() => import('@/modules/dashboard/DashboardPage').the
 const CustomerListPage = lazy(() => import('@/modules/customers/CustomerListPage').then((m) => ({ default: m.CustomerListPage })));
 const CustomerDetailsPage = lazy(() => import('@/modules/customers/CustomerDetailsPage').then((m) => ({ default: m.CustomerDetailsPage })));
 const CustomerFormPage = lazy(() => import('@/modules/customers/CustomerFormPage').then((m) => ({ default: m.CustomerFormPage })));
-const NotificationsPage = lazy(() => import("@/modules/notifications/NotificationsPage").then((m) => ({default: m.NotificationsPage })));
 const InvoiceListPage = lazy(() => import('@/modules/invoices/InvoiceListPage').then((m) => ({ default: m.InvoiceListPage })));
 const InvoiceCreatePage = lazy(() => import('@/modules/invoices/InvoiceCreatePage').then((m) => ({ default: m.InvoiceCreatePage })));
 const InvoiceDetailsPage = lazy(() => import('@/modules/invoices/InvoiceDetailsPage').then((m) => ({ default: m.InvoiceDetailsPage })));
@@ -33,7 +32,8 @@ const ModuleManagementPage = lazy(() => import('@/modules/admin/ModuleManagement
 const AuditLogsPage = lazy(() => import('@/modules/admin/AuditLogsPage').then((m) => ({ default: m.AuditLogsPage })));
 const UsageAnalyticsPage = lazy(() => import('@/modules/admin/UsageAnalyticsPage').then((m) => ({ default: m.UsageAnalyticsPage })));
 const InvoiceTemplatesPage = lazy(() => import('@/modules/admin/InvoiceTemplatesPage').then((m) => ({ default: m.InvoiceTemplatesPage })));
-const ExternalIntegrationsPage = lazy(() => import('@/modules/settings/ExternalIntegrationsPage').then((m) => ({ default: m.ExternalIntegrationsPage })));
+// const ExternalIntegrationsPage = lazy(() => import('@/modules/settings/ExternalIntegrationsPage').then((m) => ({ default: m.ExternalIntegrationsPage })));
+const MasterConsolePage = lazy(() => import('@/modules/master/MasterConsolePage').then((m) => ({ default: m.MasterConsolePage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -76,9 +76,6 @@ export default function App() {
               <Route path="/customers/:id/edit" element={<ProtectedRoute module="customers"><CustomerFormPage /></ProtectedRoute>} />
 
               {/* Invoices */}
-              <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>}/>
-
-              {/* Invoices */}
               <Route path="/invoices" element={<ProtectedRoute module="invoices"><InvoiceListPage /></ProtectedRoute>} />
               <Route path="/invoices/new" element={<ProtectedRoute module="invoices"><InvoiceCreatePage /></ProtectedRoute>} />
               <Route path="/invoices/:id" element={<ProtectedRoute module="invoices"><InvoiceDetailsPage /></ProtectedRoute>} />
@@ -99,7 +96,7 @@ export default function App() {
 
               {/* Settings */}
               <Route path="/settings" element={<ProtectedRoute module="settings"><SettingsPage /></ProtectedRoute>} />
-              <Route path="/settings/external-integrations" element={<ProtectedRoute module="settings"><ExternalIntegrationsPage /></ProtectedRoute>} />
+              {/* <Route path="/settings/external-integrations" element={<ProtectedRoute module="settings"><ExternalIntegrationsPage /></ProtectedRoute>} /> */}
 
               {/* Admin */}
               <Route path="/admin/users" element={<ProtectedRoute module="admin" adminOnly><UserManagementPage /></ProtectedRoute>} />
@@ -107,6 +104,9 @@ export default function App() {
               <Route path="/admin/invoice-templates" element={<ProtectedRoute module="admin" adminOnly><InvoiceTemplatesPage /></ProtectedRoute>} />
               <Route path="/admin/audit-logs" element={<ProtectedRoute module="admin" adminOnly><AuditLogsPage /></ProtectedRoute>} />
               <Route path="/admin/usage" element={<ProtectedRoute module="admin" adminOnly><UsageAnalyticsPage /></ProtectedRoute>} />
+
+              {/* Platform (SUPER_ADMIN only — enforced inside the page via RLS-backed queries) */}
+              <Route path="/master" element={<ProtectedRoute><MasterConsolePage /></ProtectedRoute>} />
             </Route>
 
             {/* Redirects */}

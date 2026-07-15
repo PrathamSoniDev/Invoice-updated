@@ -45,7 +45,7 @@ export function ActivityTimeline({ items, className, maxItems }: ActivityTimelin
             </div>
             <div className="flex-1 pt-1">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium text-foreground">{item.userName}</p>
+                <p className="text-sm font-medium text-foreground">{item.userName || 'System'}</p>
                 <span className="text-xs text-muted-foreground whitespace-nowrap">{timeAgo(item.timestamp)}</span>
               </div>
               <p className="text-sm text-muted-foreground mt-0.5">{item.description}</p>
