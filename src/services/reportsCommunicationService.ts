@@ -358,7 +358,6 @@ export const communicationService = {
       .from('message_templates')
       .select('*')
       .eq('companyId', companyId)
-      .eq('isActive', true);
 
     if (error) throw error;
 
@@ -366,27 +365,48 @@ export const communicationService = {
       id: t.id,
       name: t.name,
       channel: t.channel.toLowerCase() as MessageTemplate['channel'],
-      subject: t.subject || '',
-      body: t.body,
-      variables: Array.isArray(t.variables) ? t.variables : [],
+      subject: t.subject ?? '',
+      body: t.body ?? '',
+      variables: Array.isArray(t.variables)
+        ? t.variables
+        : JSON.parse(t.variables || '[]'),
       createdAt: t.createdAt,
+
+      isDefault: t.isDefault,
+      isActive: t.isActive,
+      updatedAt: t.updatedAt,
     }));
   },
 
   async createTemplate(input: Omit<MessageTemplate, 'id' | 'createdAt'>): Promise<MessageTemplate> {
     const companyId = await getCurrentCompanyId();
 
+    const { data: existing, error: existingError } = await supabase
+        .from("message_templates")
+        .select("*")
+        .eq("companyId", companyId)
+        .eq("channel", input.channel.toUpperCase());
+
+      if (existingError) throw existingError;
+
+      if ((existing?.length ?? 0) >= 2) {
+        throw new Error(
+          `Maximum 2 ${input.channel} templates are allowed.`
+        );
+      } 
+
     const { data, error } = await supabase
       .from('message_templates')
       .insert({
-        companyId,
-        name: input.name,
-        channel: input.channel.toUpperCase(),
-        subject: input.subject,
-        body: input.body,
-        variables: input.variables,
-        isActive: true,
-      })
+          companyId,
+          name: input.name,
+          channel: input.channel.toUpperCase(),
+          subject: input.subject,
+          body: input.body,
+          variables: input.variables,
+          isDefault: false,
+          isActive: existing.length === 0,
+      })      
       .select()
       .single();
 
@@ -399,8 +419,130 @@ export const communicationService = {
       subject: data.subject || '',
       body: data.body,
       variables: Array.isArray(data.variables) ? data.variables : [],
+      isDefault: data.isDefault,
+      isActive: data.isActive,
       createdAt: data.createdAt,
+      updatedAt: data.updatedAt,
     };
+  },
+
+  async setDefaultTemplate(id: string): Promise<void> {
+    const companyId = await getCurrentCompanyId();
+
+    // Selected template
+    const { data: template, error: templateError } = await supabase
+      .from("message_templates")
+      .select("channel")
+      .eq("id", id)
+      .eq("companyId", companyId)
+      .single();
+
+    if (templateError) throw templateError;
+
+    // Disable all templates of same channel
+    const { error: resetError } = await supabase
+      .from("message_templates")
+      .update({ isDefault: false })
+      .eq("companyId", companyId)
+      .eq("channel", template.channel);
+
+    if (resetError) throw resetError;
+
+    // Selected template is default template
+    const { error: updateError } = await supabase
+      .from("message_templates")
+      .update({
+        isDefault: true,
+        updatedAt: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("companyId", companyId);
+
+    if (updateError) throw updateError;
+  },
+
+  async setActiveTemplate(templateId: string): Promise<void> {
+    const companyId = await getCurrentCompanyId();
+
+    // Find selected template
+    const { data: template, error } = await supabase
+      .from("message_templates")
+      .select("channel")
+      .eq("companyId", companyId)
+      .eq("id", templateId)
+      .single();
+
+    if (error) throw error;
+    if (!template) throw new Error("Template not found");
+
+    // Disable all templates of same channel
+    const { error: disableError } = await supabase
+      .from("message_templates")
+      .update({ isActive: false })
+      .eq("companyId", companyId)
+      .eq("channel", template.channel);
+
+    if (disableError) throw disableError;
+
+    // Activate selected template
+    const { error: activeError } = await supabase
+      .from("message_templates")
+      .update({ isActive: true })
+      .eq("companyId", companyId)
+      .eq("id", templateId);
+
+    if (activeError) throw activeError;
+  },
+
+  async updateTemplate(
+    id: string,
+    input: Omit<MessageTemplate, 'id' | 'createdAt'>
+  ): Promise<MessageTemplate> {
+    const companyId = await getCurrentCompanyId();
+
+    const { data, error } = await supabase
+      .from('message_templates')
+      .update({
+        name: input.name,
+        channel: input.channel.toUpperCase(),
+        subject: input.subject,
+        body: input.body,
+        variables: input.variables,
+        isActive: input.isActive,
+        isDefault: input.isDefault,
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('companyId', companyId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return {
+      id: data.id,
+      name: data.name,
+      channel: data.channel.toLowerCase() as MessageTemplate['channel'],
+      subject: data.subject ?? '',
+      body: data.body,
+      variables: Array.isArray(data.variables) ? data.variables : [],
+      isActive: data.isActive,
+      isDefault: data.isDefault,
+      createdAt: data.createdAt,
+      updatedAt: data.updatedAt,
+    };
+  },
+
+  async deleteTemplate(templateId: string): Promise<void> {
+    const companyId = await getCurrentCompanyId();
+
+    const { error } = await supabase
+      .from("message_templates")
+      .delete()
+      .eq("companyId", companyId)
+      .eq("id", templateId);
+
+    if (error) throw error;
   },
 
   async sendInvoiceEmail(invoiceId: string): Promise<any> {

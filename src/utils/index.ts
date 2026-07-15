@@ -54,12 +54,12 @@ export function timeAgo(date: string | Date): string {
 }
 
 export function getInitials(name: string): string {
-  return name
+  return name ? name
     .split(' ')
     .map((n) => n[0])
     .slice(0, 2)
     .join('')
-    .toUpperCase();
+    .toUpperCase() : "";
 }
 
 export function generateId(prefix = 'id'): string {
