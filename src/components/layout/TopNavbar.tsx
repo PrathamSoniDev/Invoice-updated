@@ -6,6 +6,12 @@ import { useAuthStore } from '@/store/authStore';
 import { searchIndex, type SearchResult } from '@/store/searchIndexStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+
+import { notificationService } from "@/services/notificationService";
+import type { Notification } from "@/types";
+import { formatDate } from "@/utils";
+import { toast } from "sonner";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +43,42 @@ export function TopNavbar() {
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  useEffect(() => {
+    loadNotifications();
+  }, []);
+
+  async function loadNotifications() {
+    try {
+      const data = await notificationService.getLatest(3);
+      setNotifications(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleRead(id: string) {
+    try {
+      await notificationService.markAsRead(id);
+
+      setNotifications((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                isRead: true,
+                readAt: new Date().toISOString(),
+              }
+            : item
+        )
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update notification");
+    }
+  }
 
   // Cmd/Ctrl+K focuses the search box from anywhere in the app.
   useEffect(() => {
@@ -144,30 +186,51 @@ export function TopNavbar() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="relative h-9 w-9">
               <Bell className="h-[18px] w-[18px]" />
-              <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive ring-2 ring-background" />
+              {notifications.some((n) => !n.isRead) && (
+                <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive ring-2 ring-background" />
+              )}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-80">
             <DropdownMenuLabel className="flex items-center justify-between">
               <span>Notifications</span>
-              <Badge variant="secondary" className="text-xs">3 new</Badge>
+               <Badge variant="secondary" className="text-xs">
+                {notifications.filter((n) => !n.isRead).length} new
+              </Badge>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {[
-              { title: 'Payment Received', desc: 'Invoice INV-2025-1005 was paid', time: '2m ago' },
-              { title: 'Invoice Overdue', desc: 'Invoice INV-2025-1002 is overdue', time: '1h ago' },
-              { title: 'New Customer', desc: 'TechFlow Solutions was added', time: '3h ago' },
-            ].map((notif, i) => (
-              <DropdownMenuItem key={i} className="flex flex-col items-start gap-1 py-2.5">
+            {notifications.map((notif) => (
+              <DropdownMenuItem
+                key={notif.id}
+                className="flex flex-col items-start gap-1 py-2.5"
+                onClick={() => handleRead(notif.id)}
+              >
                 <div className="flex w-full items-center justify-between">
-                  <span className="text-sm font-medium">{notif.title}</span>
-                  <span className="text-xs text-muted-foreground">{notif.time}</span>
+                  <span
+                    className={`text-sm ${
+                      !notif.isRead ? "font-semibold" : "font-medium"
+                    }`}
+                  >
+                    {notif.title}
+                  </span>
+
+                  <span className="text-xs text-muted-foreground">
+                    {formatDate(notif.createdAt, "short")}
+                  </span>
                 </div>
-                <span className="text-xs text-muted-foreground">{notif.desc}</span>
+
+                <span className="text-xs text-muted-foreground">
+                  {notif.message}
+                </span>
               </DropdownMenuItem>
             ))}
+            {notifications.length === 0 && (
+              <div className="py-6 text-center text-sm text-muted-foreground">
+                No notifications found
+              </div>
+            )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="justify-center text-sm text-primary">
+            <DropdownMenuItem className="justify-center text-sm text-primary" onClick={() => navigate("/notifications")}>
               View all notifications
             </DropdownMenuItem>
           </DropdownMenuContent>
