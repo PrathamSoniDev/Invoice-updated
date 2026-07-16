@@ -57,9 +57,7 @@ router.get('/authorize', async (req, res) => {
   }
 });
 
-// ============================================================================
-// GET /api/gateways/razorpay/oauth/callback
-// ============================================================================
+
 // Razorpay redirects the merchant's browser here with either `code` + `state`
 // (approved) or `error` + `state` (denied/failed) — see
 // https://razorpay.com/docs/partners/technology-partners/onboard-businesses/integrate-oauth/integration-steps/#21-initiate-authorisation-using-url
