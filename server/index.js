@@ -1,17 +1,15 @@
-// Express application entry point for the InvoiceGen backend.
-//
-// The Resend API key lives only in process.env (server/.env) and
-// is consumed exclusively by services/emailService.js. It is never exposed
-// to the frontend.
+// The Resend API key lives only in process.env (server/.env) 
 
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import invoiceRoutes from './routes/invoiceRoutes.js';
 import paymentRoutes from "./routes/paymentRoutes.js";
+import paymentLinkRoutes from "./routes/paymentLinkRoutes.js";
 import paytmRoutes from "./routes/paytmRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import webhookRoutes from "./routes/webhookRoutes.js";
+import razorpayOauthRoutes from "./routes/razorpayOauthRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -24,14 +22,7 @@ app.use(
   }),
 );
 
-// The Razorpay webhook signature is an HMAC over the exact raw request
-// bytes Razorpay sent — it must be captured as a Buffer BEFORE the global
-// express.json() below parses (and potentially re-serializes) the body, or
-// signature verification will fail. This has to be registered first and
-// scoped to only this one path; every other route still gets normal JSON
-// parsing. (Paytm's checksum is computed over the parsed field set, not raw
-// bytes, so /api/webhooks/paytm doesn't need this and uses the global
-// json()/urlencoded() parsers below like everything else.)
+// The Razorpay webhook signature is an HMAC over the exact raw request bytes Razorpay sent 
 app.use('/api/webhooks/razorpay', express.raw({ type: 'application/json' }));
 
 app.use(express.json({ limit: '1mb' }));
@@ -47,10 +38,12 @@ app.get('/health', (_req, res) => {
 // Register the invoice router under /api/invoices so the full endpoint is
 // POST /api/invoices/send
 app.use('/api/invoices', invoiceRoutes);
+app.use("/api/payment-links", paymentLinkRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/paytm", paytmRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/webhooks", webhookRoutes);
+app.use("/api/gateways/razorpay/oauth", razorpayOauthRoutes);
 
 // ---- 404 handler ----------------------------------------------------------
 app.use((_req, res) => {

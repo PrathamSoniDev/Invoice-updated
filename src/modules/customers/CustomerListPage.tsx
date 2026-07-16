@@ -30,13 +30,21 @@ export function CustomerListPage() {
 
   const refresh = () => {
     setLoading(true);
-    customerService.list({ search, status: statusFilter, page, limit }).then((res) => {
-      setCustomers(res.data);
-      useSearchIndexStore.getState().setCustomers(res.data);
-      setTotal(res.total);
-      setTotalPages(res.totalPages);
-      setLoading(false);
-    });
+    customerService.list({ search, status: statusFilter, page, limit })
+      .then((res) => {
+        setCustomers(res.data);
+        useSearchIndexStore.getState().setCustomers(res.data);
+        setTotal(res.total);
+        setTotalPages(res.totalPages);
+      })
+      .catch((error) => {
+        console.error('[CustomerListPage] Failed to load customers:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to load customers');
+        setCustomers([]);
+        setTotal(0);
+        setTotalPages(1);
+      })
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {

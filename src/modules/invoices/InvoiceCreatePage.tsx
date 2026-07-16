@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,13 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { customerService } from '@/services/customerService';
 import { invoiceService } from '@/services/invoiceService';
 import { sendInvoiceEmail } from '@/services/emailService';
@@ -23,8 +30,21 @@ const steps = [
   { number: 3, label: 'Review & Send' },
 ];
 
+// Standard Indian GST slabs. The user can still pick "Custom" for anything
+// outside these (e.g. cess-adjusted or exempt-with-a-twist rates), which
+// reveals a free-form number input.
+const GST_RATE_OPTIONS = [0, 5, 12, 18, 28];
+
 export function InvoiceCreatePage() {
   const navigate = useNavigate();
+  // Present only on the /invoices/:id/edit route. Its presence is what
+  // distinguishes "editing an existing invoice" from "creating a new one" —
+  // previously this page had no notion of edit mode at all and always
+  // called invoiceService.create(), which is why using the Edit button
+  // silently created a duplicate invoice instead of updating the original.
+  const { id } = useParams<{ id: string }>();
+  const isEditMode = Boolean(id);
+
   const [step, setStep] = useState(1);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -37,10 +57,49 @@ export function InvoiceCreatePage() {
   const [notes, setNotes] = useState('Thank you for your business.');
   const [terms, setTerms] = useState('Payment due within 30 days. Late payments subject to 1.5% monthly interest.');
   const [saving, setSaving] = useState(false);
+  const [loadingInvoice, setLoadingInvoice] = useState(isEditMode);
 
   useEffect(() => {
     customerService.list({ limit: 100 }).then((res) => setCustomers(res.data)).catch(() => setCustomers([]));
   }, []);
+
+  // Load the existing invoice + its customer when editing, and populate the
+  // form with their current values so the user is editing real data rather
+  // than starting from the blank defaults above.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+
+    (async () => {
+      setLoadingInvoice(true);
+      try {
+        const invoice = await invoiceService.get(id);
+        const customer = await customerService.get(invoice.customerId);
+        if (cancelled) return;
+
+        setSelectedCustomer(customer);
+        setLineItems(
+          invoice.lineItems.length > 0
+            ? invoice.lineItems.map((item) => ({ ...item }))
+            : [{ id: generateId('item'), description: '', quantity: 1, rate: 0, discount: 0, taxRate: 18, amount: 0 }],
+        );
+        setIssueDate(invoice.issueDate.split('T')[0]);
+        setDueDate(invoice.dueDate.split('T')[0]);
+        setNotes(invoice.notes || '');
+        setTerms(invoice.terms || '');
+      } catch (error) {
+        console.error('[InvoiceCreatePage] failed to load invoice for editing:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to load invoice');
+        navigate('/invoices');
+      } finally {
+        if (!cancelled) setLoadingInvoice(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, navigate]);
 
   // TEMPORARY DEBUG: log the items rendered on the Review page so we can
   // confirm the send handler validates the same collection. Remove after
@@ -131,8 +190,11 @@ export function InvoiceCreatePage() {
       // Remove after verifying the fix at runtime.
       console.debug('[InvoiceCreatePage.handleSave] API payload items:', payload.items.length, payload.items);
 
-      // Step 1: Create the invoice in the database (always as DRAFT first).
-      const createdInvoice = await invoiceService.create(payload);
+      // Step 1: Persist the invoice — update the existing row when editing,
+      // otherwise create a new one (always as DRAFT first on create).
+      const savedInvoice = isEditMode && id
+        ? await invoiceService.update(id, payload)
+        : await invoiceService.create(payload);
 
       // Step 2: If the user clicked "Send Invoice", actually send the email
       // via the backend Resend integration. We only mark the invoice as
@@ -144,22 +206,22 @@ export function InvoiceCreatePage() {
             customerEmail: selectedCustomer.email,
             customerName: selectedCustomer.name,
             invoice: {
-              number: createdInvoice.number,
-              lineItems: createdInvoice.lineItems.map((item) => ({
+              number: savedInvoice.number,
+              lineItems: savedInvoice.lineItems.map((item) => ({
                 description: item.description,
                 quantity: item.quantity,
                 rate: item.rate,
                 amount: item.amount,
               })),
-              subtotal: createdInvoice.subtotal,
-              taxAmount: createdInvoice.taxAmount,
-              total: createdInvoice.total,
-              dueDate: createdInvoice.dueDate,
+              subtotal: savedInvoice.subtotal,
+              taxAmount: savedInvoice.taxAmount,
+              total: savedInvoice.total,
+              dueDate: savedInvoice.dueDate,
             },
           });
           // Email confirmed — now mark the invoice as SENT in the database.
-          await invoiceService.send(createdInvoice.id);
-          toast.success('Invoice sent successfully');
+          await invoiceService.send(savedInvoice.id);
+          toast.success(isEditMode ? 'Invoice updated and sent successfully' : 'Invoice sent successfully');
         } catch (emailError) {
           // Email failed — the invoice remains a DRAFT. Show the real error
           // so the user knows the email was NOT sent.
@@ -174,7 +236,7 @@ export function InvoiceCreatePage() {
           return;
         }
       } else {
-        toast.success('Invoice saved as draft');
+        toast.success(isEditMode ? 'Invoice updated' : 'Invoice saved as draft');
       }
       navigate('/invoices');
     } catch (error) {
@@ -185,11 +247,15 @@ export function InvoiceCreatePage() {
     }
   };
 
+  if (loadingInvoice) {
+    return <div className="py-16 text-center text-muted-foreground">Loading invoice...</div>;
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Create Invoice"
-        description="Generate a new invoice in 3 simple steps"
+        title={isEditMode ? 'Edit Invoice' : 'Create Invoice'}
+        description={isEditMode ? 'Update this invoice\'s details' : 'Generate a new invoice in 3 simple steps'}
         back
         icon={FileText}
       />
@@ -304,7 +370,7 @@ export function InvoiceCreatePage() {
                         <th className="text-right p-2 font-medium text-xs uppercase text-muted-foreground w-20">Qty</th>
                         <th className="text-right p-2 font-medium text-xs uppercase text-muted-foreground w-28">Rate</th>
                         <th className="text-right p-2 font-medium text-xs uppercase text-muted-foreground w-24">Discount</th>
-                        <th className="text-right p-2 font-medium text-xs uppercase text-muted-foreground w-20">Tax%</th>
+                        <th className="text-right p-2 font-medium text-xs uppercase text-muted-foreground w-36">Tax%</th>
                         <th className="text-right p-2 font-medium text-xs uppercase text-muted-foreground w-28">Amount</th>
                         <th className="w-10"></th>
                       </tr>
@@ -345,12 +411,34 @@ export function InvoiceCreatePage() {
                             />
                           </td>
                           <td className="p-2">
-                            <Input
-                              type="number"
-                              value={item.taxRate}
-                              onChange={(e) => updateLineItem(item.id, 'taxRate', Number(e.target.value))}
-                              className="text-right border-0 shadow-none focus-visible:ring-0"
-                            />
+                            <div className="flex items-center gap-1.5">
+                              <Select
+                                value={GST_RATE_OPTIONS.includes(item.taxRate) ? String(item.taxRate) : 'custom'}
+                                onValueChange={(v) => {
+                                  if (v === 'custom') return;
+                                  updateLineItem(item.id, 'taxRate', Number(v));
+                                }}
+                              >
+                                <SelectTrigger className="h-9 w-[92px] border-0 shadow-none focus:ring-0">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {GST_RATE_OPTIONS.map((rate) => (
+                                    <SelectItem key={rate} value={String(rate)}>{rate}% GST</SelectItem>
+                                  ))}
+                                  <SelectItem value="custom">Custom</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {!GST_RATE_OPTIONS.includes(item.taxRate) && (
+                                <Input
+                                  type="number"
+                                  value={item.taxRate}
+                                  onChange={(e) => updateLineItem(item.id, 'taxRate', Number(e.target.value))}
+                                  className="w-16 text-right border-0 shadow-none focus-visible:ring-0"
+                                  aria-label="Custom tax rate"
+                                />
+                              )}
+                            </div>
                           </td>
                           <td className="p-2 text-right font-medium">{formatCurrency(item.amount)}</td>
                           <td className="p-2">
@@ -481,7 +569,7 @@ export function InvoiceCreatePage() {
         <div className="flex items-center gap-2">
           {step === 3 && (
             <Button variant="outline" onClick={() => handleSave('draft')} disabled={saving} className="gap-2">
-              <Save className="h-4 w-4" /> Save as Draft
+              <Save className="h-4 w-4" /> {isEditMode ? 'Save Changes' : 'Save as Draft'}
             </Button>
           )}
           {step < 3 ? (
@@ -490,7 +578,7 @@ export function InvoiceCreatePage() {
             </Button>
           ) : (
             <Button onClick={() => handleSave('sent')} disabled={saving} className="gap-2">
-              <Send className="h-4 w-4" /> {saving ? 'Sending...' : 'Send Invoice'}
+              <Send className="h-4 w-4" /> {saving ? (isEditMode ? 'Updating...' : 'Sending...') : (isEditMode ? 'Update & Send' : 'Send Invoice')}
             </Button>
           )}
         </div>

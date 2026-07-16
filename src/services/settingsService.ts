@@ -3,12 +3,8 @@ import { supabase } from '@/lib/supabase';
 import { getCurrentCompanyId, getCurrentUserId } from '@/lib/database';
 import type { CompanyInfo, BankInfo, InvoiceSettings, CommunicationSettings, GatewaySettings, GatewayCredentialsUpdate } from '@/types';
 
-// Gateway credentials (razorpayKeySecret / paytmMerchantKey) are never read
-// or written directly against the `gateway_settings` table from the client
-// — they're encrypted at rest and only reachable through these two Edge
-// Functions (see supabase/functions/save-gateway-credentials and
-// get-gateway-status, and the 20260712120000_encrypt_gateway_credentials.sql
-// migration).
+// Gateway credentials (razorpayKeySecret / paytmMerchantKey) are never read written directly against the `gateway_settings` table from the client— they're encrypted at rest 
+
 async function invokeGatewayFunction<T>(name: 'save-gateway-credentials' | 'get-gateway-status', body?: Record<string, unknown>): Promise<T> {
   const {
     data: { session },
@@ -102,7 +98,17 @@ export const settingsService = {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      // PGRST116 = "the result contains 0 rows" — the update's WHERE clause
+      // matched nothing, almost always because this account's companyId
+      
+      if (error.code === 'PGRST116') {
+        throw new Error(
+          'Your account isn\u2019t linked to a valid company record, so this change couldn\u2019t be saved. Please contact support to fix your account setup.',
+        );
+      }
+      throw error;
+    }
 
     return {
       name: data.name,
@@ -414,7 +420,15 @@ export const settingsService = {
   async getGatewaySettings(): Promise<GatewaySettings | null> {
     try {
       const status = await invokeGatewayFunction<{
-        razorpay: { enabled: boolean; keyId: string; webhookSecret: string; upiId: string; keySecretPreview: string | null };
+        razorpay: {
+          enabled: boolean;
+          keyId: string;
+          webhookSecret: string;
+          upiId: string;
+          keySecretPreview: string | null;
+          connectionMethod?: 'manual' | 'oauth';
+          oauth?: { accountId: string | null; connected: boolean; expiresAt: string | null; reconnectNeeded: boolean } | null;
+        };
         paytm: { enabled: boolean; merchantId: string; environment: 'TEST' | 'PROD'; upiId: string; merchantKeyPreview: string | null };
       }>('get-gateway-status');
 
@@ -425,6 +439,8 @@ export const settingsService = {
           keySecretPreview: status.razorpay.keySecretPreview ?? null,
           webhookSecret: status.razorpay.webhookSecret || '',
           upiId: status.razorpay.upiId || '',
+          connectionMethod: status.razorpay.connectionMethod || 'manual',
+          oauth: status.razorpay.oauth ?? null,
         },
         paytm: {
           status: status.paytm.enabled ? 'connected' : 'disconnected',
@@ -437,6 +453,66 @@ export const settingsService = {
     } catch (err) {
       console.error('[getGatewaySettings] get-gateway-status failed:', err instanceof Error ? err.message : err);
       return null;
+    }
+  },
+
+  // Lets the frontend check whether OAuth is even configured server-side
+  // before attempting to redirect a user there (used by both the manual
+  // Settings page and the auto-connect prompt) — avoids bouncing someone to
+  // a 503 error page when RAZORPAY_OAUTH_* env vars aren't set yet.
+  async getRazorpayOauthConfigStatus(): Promise<{ configured: boolean }> {
+    const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:4000/api').replace(/\/+$/, '');
+    try {
+      const response = await fetch(`${apiBase}/gateways/razorpay/oauth/status`);
+      if (!response.ok) return { configured: false };
+      return await response.json();
+    } catch {
+      return { configured: false };
+    }
+  },
+
+  // Phase B/E (Razorpay OAuth): resolves the URL the "Connect with Razorpay"
+  // button should navigate the browser to. This is a full top-level
+  // navigation (not a fetch), so — unlike every other authenticated call in
+  // this file — the caller's access token has to travel as a query param
+  // rather than an Authorization header; see the matching comment in
+  // server/routes/razorpayOauthRoutes.js for the trade-off this implies.
+  async getRazorpayOauthAuthorizeUrl(): Promise<string> {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      throw new Error('Not authenticated');
+    }
+
+    const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:4000/api').replace(/\/+$/, '');
+    const url = new URL(`${apiBase}/gateways/razorpay/oauth/authorize`);
+    url.searchParams.set('access_token', session.access_token);
+    return url.toString();
+  },
+
+  // Phase E: "Disconnect" for a company on the OAuth connection path — best
+  // effort revokes the token with Razorpay, then always clears our own
+  // stored copy server-side.
+  async disconnectRazorpayOauth(): Promise<void> {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      throw new Error('Not authenticated');
+    }
+
+    const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:4000/api').replace(/\/+$/, '');
+    const response = await fetch(`${apiBase}/gateways/razorpay/oauth/revoke`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data?.success === false) {
+      throw new Error(data?.message || 'Failed to disconnect Razorpay');
     }
   },
 

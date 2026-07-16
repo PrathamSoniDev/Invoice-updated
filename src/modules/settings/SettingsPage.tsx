@@ -20,9 +20,11 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSettingsStore } from '@/store/settingsStore';
-import { Settings, Building2, Banknote, FileText, MessageSquare, CreditCard, Save, Check, Zap, Wallet, Loader2, AlertCircle, Eye, EyeOff, ShieldCheck, Link2Off } from 'lucide-react';
+import { settingsService } from '@/services/settingsService';
+import { Settings, Building2, Banknote, FileText, MessageSquare, CreditCard, Save, Check, Zap, Wallet, Loader2, AlertCircle, Eye, EyeOff, ShieldCheck, Link2Off, ShieldAlert, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
+import { useSearchParams } from 'react-router-dom';
 
 export function SettingsPage() {
   const {
@@ -36,18 +38,21 @@ export function SettingsPage() {
     updateInvoice,
     updateCommunication,
     updateGateways,
+    refreshGateways,
     fetchSettings,
     isLoading,
     isInitialized,
     error,
   } = useSettingsStore();
   const [activeTab, setActiveTab] = useState('company');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [isConnectingOauth, setIsConnectingOauth] = useState(false);
+  const [isDisconnectingOauth, setIsDisconnectingOauth] = useState(false);
 
   // Gateway connect dialog state
-  const [connectDialog, setConnectDialog] = useState<'razorpay' | 'paytm' | null>(null);
+  const [connectDialog, setConnectDialog] = useState<'paytm' | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
-  const [razorpayForm, setRazorpayForm] = useState({ keyId: '', keySecret: '', webhookSecret: '', upiId: '' });
   const [paytmForm, setPaytmForm] = useState({ merchantId: '', merchantKey: '', environment: 'TEST' as 'TEST' | 'PROD', upiId: '' });
 
   useEffect(() => {
@@ -55,6 +60,68 @@ export function SettingsPage() {
       fetchSettings();
     }
   }, [fetchSettings, isInitialized, isLoading]);
+
+  // Picks up the result of the Razorpay OAuth redirect. The Express
+  // callback (server/routes/razorpayOauthRoutes.js) finishes by redirecting
+  // the browser back to /settings?razorpay_oauth=success|denied|error, so
+  // this only ever needs to read the query param and refetch — the actual
+  // token exchange already happened server-side before we get here.
+  useEffect(() => {
+    const result = searchParams.get('razorpay_oauth');
+    if (!result) return;
+
+    if (result === 'success') {
+      toast.success('Razorpay connected successfully');
+      setActiveTab('gateways');
+      refreshGateways();
+    } else if (result === 'denied') {
+      toast.info('Razorpay connection was cancelled');
+      setActiveTab('gateways');
+    } else if (result === 'error') {
+      const reason = searchParams.get('reason');
+      toast.error(
+        reason === 'invalid_state'
+          ? 'That Razorpay connection link expired — please try connecting again.'
+          : 'Unable to connect Razorpay. Please try again or use manual Key ID/Key Secret entry.',
+      );
+      setActiveTab('gateways');
+    }
+
+    // Clean the query params out of the URL so a refresh doesn't re-trigger the toast.
+    const next = new URLSearchParams(searchParams);
+    next.delete('razorpay_oauth');
+    next.delete('reason');
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // "Connect with Razorpay" — a full top-level navigation (see the comment
+  // on settingsService.getRazorpayOauthAuthorizeUrl for why this can't be a
+  // fetch call). Razorpay eventually redirects back to this same page with
+  // ?razorpay_oauth=... handled by the effect above.
+  const handleRazorpayOauthConnect = async () => {
+    setIsConnectingOauth(true);
+    try {
+      const url = await settingsService.getRazorpayOauthAuthorizeUrl();
+      window.location.href = url;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Unable to start Razorpay OAuth connection');
+      setIsConnectingOauth(false);
+    }
+  };
+
+  const handleRazorpayOauthDisconnect = async () => {
+    setIsDisconnectingOauth(true);
+    try {
+      await settingsService.disconnectRazorpayOauth();
+      toast.success('Razorpay disconnected');
+      await refreshGateways();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Unable to disconnect Razorpay');
+    } finally {
+      setIsDisconnectingOauth(false);
+    }
+  };
 
   const handleSave = (section: string) => toast.success(`${section} settings saved`);
 
@@ -69,60 +136,23 @@ export function SettingsPage() {
     </Card>
   );
 
-  const openConnectDialog = (gw: 'razorpay' | 'paytm') => {
+  const openConnectDialog = (gw: 'paytm') => {
     setShowSecret(false);
     // IMPORTANT: the secret field is left BLANK when opening the dialog to
-    // manage an already-connected gateway. gateways.*.keySecretPreview /
-    // merchantKeyPreview only ever hold a masked preview (e.g. "••••3f9a")
-    // — never the real secret — so there's nothing to prefill. Leaving the
-    // field blank and only sending it up if the user types a new value is
-    // what lets "Manage" update the Key ID/webhook/UPI fields without
-    // forcing the user to re-enter (or accidentally overwrite with the
-    // masked placeholder) a secret they aren't changing.
-    if (gw === 'razorpay') {
-      setRazorpayForm({
-        keyId: gateways?.razorpay.keyId || '',
-        keySecret: '',
-        webhookSecret: gateways?.razorpay.webhookSecret || '',
-        upiId: gateways?.razorpay.upiId || bank?.upiId || '',
-      });
-    } else {
-      setPaytmForm({
-        merchantId: gateways?.paytm.merchantId || '',
-        merchantKey: '',
-        environment: gateways?.paytm.environment || 'TEST',
-        upiId: gateways?.paytm.upiId || bank?.upiId || '',
-      });
-    }
+    // manage an already-connected gateway. merchantKeyPreview only ever
+    // holds a masked preview (e.g. "••••3f9a") — never the real secret — so
+    // there's nothing to prefill. Leaving the field blank and only sending
+    // it up if the user types a new value is what lets "Manage" update the
+    // Merchant ID/environment/UPI fields without forcing the user to
+    // re-enter (or accidentally overwrite with the masked placeholder) a
+    // secret they aren't changing.
+    setPaytmForm({
+      merchantId: gateways?.paytm.merchantId || '',
+      merchantKey: '',
+      environment: gateways?.paytm.environment || 'TEST',
+      upiId: gateways?.paytm.upiId || bank?.upiId || '',
+    });
     setConnectDialog(gw);
-  };
-
-  const handleRazorpayConnect = async () => {
-    const alreadyConnected = gateways?.razorpay.status === 'connected';
-    // A secret is required the first time; once connected, it's optional —
-    // leaving it blank just means "keep the existing secret".
-    if (!razorpayForm.keyId.trim() || (!alreadyConnected && !razorpayForm.keySecret.trim())) {
-      toast.error('Key ID and Key Secret are required');
-      return;
-    }
-    setIsConnecting(true);
-    try {
-      await updateGateways({
-        razorpay: {
-          status: 'connected',
-          keyId: razorpayForm.keyId,
-          webhookSecret: razorpayForm.webhookSecret,
-          upiId: razorpayForm.upiId,
-          ...(razorpayForm.keySecret.trim() ? { keySecret: razorpayForm.keySecret.trim() } : {}),
-        },
-      });
-      toast.success('Razorpay connected successfully');
-      setConnectDialog(null);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Unable to connect Razorpay');
-    } finally {
-      setIsConnecting(false);
-    }
   };
 
   const handlePaytmConnect = async () => {
@@ -446,30 +476,84 @@ export function SettingsPage() {
                     <h3 className="text-lg font-semibold">Razorpay</h3>
                     <p className="text-sm text-muted-foreground mt-1 mb-4 flex-1">Accept payments via cards, UPI, netbanking, and wallets with India's leading payment gateway.</p>
                     <div className="mb-4">
-                      {gateways.razorpay.status === 'connected' ? (
+                      {gateways.razorpay.status === 'connected' && gateways.razorpay.connectionMethod !== 'oauth' && (
                         <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full bg-success/10 text-success">
-                          <Check className="h-3 w-3" /> Connected
+                          <Check className="h-3 w-3" /> Connected (legacy)
                         </span>
-                      ) : (
+                      )}
+                      {gateways.razorpay.connectionMethod === 'oauth' && gateways.razorpay.oauth?.reconnectNeeded && (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full bg-destructive/10 text-destructive">
+                          <ShieldAlert className="h-3 w-3" /> Reconnect needed
+                        </span>
+                      )}
+                      {gateways.razorpay.connectionMethod === 'oauth' && !gateways.razorpay.oauth?.reconnectNeeded && (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full bg-success/10 text-success">
+                          <Check className="h-3 w-3" /> Connected via Razorpay OAuth
+                        </span>
+                      )}
+                      {gateways.razorpay.status !== 'connected' && gateways.razorpay.connectionMethod !== 'oauth' && (
                         <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full bg-muted text-muted-foreground">
                           Not Connected
                         </span>
                       )}
                     </div>
-                    {gateways.razorpay.status === 'connected' ? (
+
+                    {gateways.razorpay.connectionMethod === 'oauth' ? (
+                      // Connected via OAuth: no masked-secret manage flow —
+                      // reconnecting just re-runs the same OAuth handshake,
+                      // and disconnecting revokes + clears the stored tokens.
                       <div className="w-full space-y-2">
-                        <p className="text-xs text-muted-foreground font-mono">Key ID: {gateways.razorpay.keyId ? `${gateways.razorpay.keyId.slice(0, 8)}••••` : '—'}</p>
+                        <p className="text-xs text-muted-foreground font-mono">
+                          Account: {gateways.razorpay.oauth?.accountId ? `${gateways.razorpay.oauth.accountId.slice(0, 10)}••••` : '—'}
+                        </p>
                         <div className="flex gap-2">
-                          <Button variant="outline" className="flex-1" onClick={() => openConnectDialog('razorpay')}>Manage</Button>
+                          {gateways.razorpay.oauth?.reconnectNeeded ? (
+                            <Button className="flex-1 gap-1.5" onClick={handleRazorpayOauthConnect} disabled={isConnectingOauth}>
+                              {isConnectingOauth ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                              Reconnect
+                            </Button>
+                          ) : (
+                            <Button variant="outline" className="flex-1" disabled>
+                              Connected
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            className="flex-1 gap-1.5 text-destructive hover:text-destructive"
+                            onClick={handleRazorpayOauthDisconnect}
+                            disabled={isDisconnectingOauth}
+                          >
+                            {isDisconnectingOauth ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2Off className="h-3.5 w-3.5" />}
+                            Disconnect
+                          </Button>
+                        </div>
+                      </div>
+                    ) : gateways.razorpay.status === 'connected' ? (
+                      // Legacy manual-key connection from before OAuth-only.
+                      // No manual "Manage" form anymore — nudge toward OAuth,
+                      // which will overwrite this connection method on success.
+                      <div className="w-full space-y-2">
+                        <p className="text-xs text-muted-foreground">Connected with a manually-entered key. Switch to OAuth for automatic token refresh.</p>
+                        <div className="flex gap-2">
+                          <Button className="flex-1 gap-1.5" onClick={handleRazorpayOauthConnect} disabled={isConnectingOauth}>
+                            {isConnectingOauth ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                            Switch to OAuth
+                          </Button>
                           <Button variant="outline" className="flex-1 gap-1.5 text-destructive hover:text-destructive" onClick={() => handleGatewayDisconnect('razorpay')}>
                             <Link2Off className="h-3.5 w-3.5" /> Disconnect
                           </Button>
                         </div>
                       </div>
                     ) : (
-                      <Button className="w-full gap-2" onClick={() => openConnectDialog('razorpay')}>
-                        <Zap className="h-4 w-4" /> Connect
-                      </Button>
+                      <div className="w-full space-y-2">
+                        <Button className="w-full gap-2" onClick={handleRazorpayOauthConnect} disabled={isConnectingOauth}>
+                          {isConnectingOauth ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                          {isConnectingOauth ? 'Redirecting…' : 'Connect with Razorpay'}
+                        </Button>
+                        <p className="text-[11px] leading-snug text-muted-foreground">
+                          <span className="font-medium">Owner</span> can complete this; Manager/Admin roles on your Razorpay account cannot authorize.
+                        </p>
+                      </div>
                     )}
                   </CardContent>
                 </Card>
@@ -519,96 +603,6 @@ export function SettingsPage() {
           {!gateways && renderSectionEmpty('Payment gateway')}
         </TabsContent>
       </Tabs>
-
-      {/* Razorpay Connect Dialog */}
-      <Dialog open={connectDialog === 'razorpay'} onOpenChange={(open) => !open && setConnectDialog(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <div className="flex items-center gap-3 mb-1">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-info/10">
-                <Zap className="h-5 w-5 text-info" />
-              </div>
-              <DialogTitle>Connect Razorpay</DialogTitle>
-            </div>
-            <DialogDescription>
-              Enter your Razorpay API credentials from the Razorpay Dashboard (Settings → API Keys) to start accepting cards, UPI, netbanking, and wallet payments.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Key ID <span className="text-destructive">*</span></Label>
-              <Input
-                placeholder="rzp_live_XXXXXXXXXXXX"
-                className="font-mono"
-                value={razorpayForm.keyId}
-                onChange={(e) => setRazorpayForm((f) => ({ ...f, keyId: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>
-                Key Secret {gateways?.razorpay.status !== 'connected' && <span className="text-destructive">*</span>}
-              </Label>
-              <div className="relative">
-                <Input
-                  type={showSecret ? 'text' : 'password'}
-                  placeholder={
-                    gateways?.razorpay.status === 'connected'
-                      ? `Currently ${gateways.razorpay.keySecretPreview || '••••••••'} — leave blank to keep`
-                      : 'Enter your secret key'
-                  }
-                  className="font-mono pr-10"
-                  value={razorpayForm.keySecret}
-                  onChange={(e) => setRazorpayForm((f) => ({ ...f, keySecret: e.target.value }))}
-                />
-                <button
-                  type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  onClick={() => setShowSecret((s) => !s)}
-                  tabIndex={-1}
-                >
-                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-              {gateways?.razorpay.status === 'connected' && (
-                <p className="text-xs text-muted-foreground">Only enter a value here to replace the stored secret. We never display the full secret once saved.</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label>Webhook Secret <span className="text-muted-foreground font-normal">(optional)</span></Label>
-              <Input
-                placeholder="Used to verify payment webhook signatures"
-                className="font-mono"
-                value={razorpayForm.webhookSecret}
-                onChange={(e) => setRazorpayForm((f) => ({ ...f, webhookSecret: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Settlement UPI ID <span className="text-muted-foreground font-normal">(optional)</span></Label>
-              <Input
-                placeholder="yourbusiness@okhdfcbank"
-                value={razorpayForm.upiId}
-                onChange={(e) => setRazorpayForm((f) => ({ ...f, upiId: e.target.value }))}
-              />
-              <p className="text-xs text-muted-foreground">UPI ID payouts and settlements will be linked to, in addition to your bank account.</p>
-            </div>
-            <Alert>
-              <ShieldCheck className="h-4 w-4" />
-              <AlertDescription className="text-xs">
-                Credentials are stored securely and are only used to process payments on your behalf. Card details are never entered here — Razorpay's hosted checkout collects them directly from your customers.
-              </AlertDescription>
-            </Alert>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConnectDialog(null)}>Cancel</Button>
-            <Button onClick={handleRazorpayConnect} disabled={isConnecting} className="gap-2">
-              {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-              {isConnecting ? 'Connecting...' : 'Connect Razorpay'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Paytm Business Connect Dialog */}
       <Dialog open={connectDialog === 'paytm'} onOpenChange={(open) => !open && setConnectDialog(null)}>

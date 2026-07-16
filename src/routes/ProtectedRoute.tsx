@@ -41,7 +41,7 @@ export function ProtectedRoute({ children, module, adminOnly }: ProtectedRoutePr
 if (
   module &&
   !isSuperAdmin &&
-  !user?.permissions.includes(module)
+  !user?.permissions?.includes(module)
 ) {
   console.log("❌ Failed permission check");
   console.log("module =", module);

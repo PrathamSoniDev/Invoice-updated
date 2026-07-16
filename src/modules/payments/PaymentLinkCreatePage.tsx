@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,11 +15,12 @@ import {
 } from '@/components/ui/select';
 import { customerService } from '@/services/customerService';
 import { paymentService } from '@/services/paymentService';
+import { sendPaymentLinkEmail } from '@/services/emailService';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useModuleStore } from '@/store/moduleStore';
-import type { Customer } from '@/types';
+import type { Customer, PaymentLink as PaymentLinkType } from '@/types';
 import { formatCurrency } from '@/utils';
-import { CreditCard, Save, Check, Link as LinkIcon, Copy, Mail, MessageCircle, ExternalLink } from 'lucide-react';
+import { CreditCard, Save, Check, Link as LinkIcon, Copy, Mail, MessageCircle, ExternalLink, FileText, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 
@@ -36,7 +37,8 @@ export function PaymentLinkCreatePage() {
   const [expiryDate, setExpiryDate] = useState(new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]);
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
-  const [createdLink, setCreatedLink] = useState<string | null>(null);
+  const [createdLink, setCreatedLink] = useState<PaymentLinkType | null>(null);
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   useEffect(() => {
     customerService.list({ limit: 100 }).then((res) => setCustomers(res.data)).catch(() => setCustomers([]));
@@ -48,16 +50,52 @@ export function PaymentLinkCreatePage() {
       return;
     }
     setSaving(true);
-    const link = await paymentService.createLink({
-      customerId,
-      amount: Number(amount),
-      gateway: gateway.toUpperCase(),
-      description,
-      expiryDays: Math.ceil((new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)),
-    });
-    setSaving(false);
-    setCreatedLink(link.url);
-    toast.success('Payment link created successfully');
+    try {
+      const link = await paymentService.createLink({
+        customerId,
+        amount: Number(amount),
+        gateway: gateway.toUpperCase(),
+        description,
+        expiryDays: Math.ceil((new Date(expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)),
+      });
+      setCreatedLink(link);
+      const invoicePart = link.invoiceNumber ? ` — Invoice ${link.invoiceNumber} generated` : '';
+      const emailPart = link.customerEmail ? ` and emailed to ${link.customerEmail}` : '';
+      toast.success(`Payment link created${invoicePart}${emailPart}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to create payment link');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEmailLink = async () => {
+    if (!createdLink) return;
+    const absoluteUrl = createdLink.url.startsWith('http') ? createdLink.url : `${window.location.origin}${createdLink.url}`;
+    if (!createdLink.customerEmail) {
+      toast.error('This customer has no email address on file');
+      return;
+    }
+    setSendingEmail(true);
+    try {
+      await sendPaymentLinkEmail({
+        customerEmail: createdLink.customerEmail,
+        customerName: createdLink.customerName,
+        paymentLink: {
+          linkId: createdLink.linkId,
+          amount: createdLink.amount,
+          currency: createdLink.currency,
+          url: absoluteUrl,
+          expiryDate: createdLink.expiryDate,
+          description: createdLink.description,
+        },
+      });
+      toast.success(`Payment link emailed to ${createdLink.customerEmail}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to send email');
+    } finally {
+      setSendingEmail(false);
+    }
   };
 
   return (
@@ -77,20 +115,31 @@ export function PaymentLinkCreatePage() {
             </div>
             <h2 className="text-xl font-bold">Payment Link Created!</h2>
             <p className="text-sm text-muted-foreground mt-1 mb-6">Share this link with your customer to collect payment.</p>
+
+            {createdLink.invoiceId && (
+              <div className="flex items-center justify-center gap-2 rounded-lg bg-primary/5 text-primary p-3 mb-6 text-sm">
+                <FileText className="h-4 w-4" />
+                <span>
+                  Invoice <Link to={`/invoices/${createdLink.invoiceId}`} className="font-semibold hover:underline">{createdLink.invoiceNumber}</Link> was generated automatically
+                </span>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 rounded-lg border bg-muted/50 p-3 mb-6">
               <LinkIcon className="h-4 w-4 text-primary shrink-0" />
-              <span className="text-sm font-mono flex-1 text-left truncate">{createdLink}</span>
-              <Button variant="outline" size="sm" className="gap-2" onClick={() => { navigator.clipboard.writeText(createdLink); toast.success('Link copied'); }}>
+              <span className="text-sm font-mono flex-1 text-left truncate">{createdLink.url}</span>
+              <Button variant="outline" size="sm" className="gap-2" onClick={() => { navigator.clipboard.writeText(createdLink.url); toast.success('Link copied'); }}>
                 <Copy className="h-4 w-4" /> Copy
               </Button>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2 mb-6">
-              <Button variant="outline" size="sm" className="gap-2" onClick={() => { navigator.clipboard.writeText(createdLink); toast.success('Link copied'); }}>
+              <Button variant="outline" size="sm" className="gap-2" onClick={() => { navigator.clipboard.writeText(createdLink.url); toast.success('Link copied'); }}>
                 <Copy className="h-4 w-4" /> Copy Link
               </Button>
               {emailEnabled && (
-                <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.success('Payment link sent via email')}>
-                  <Mail className="h-4 w-4" /> Email Link
+                <Button variant="outline" size="sm" className="gap-2" disabled={sendingEmail} onClick={handleEmailLink}>
+                  {sendingEmail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                  {sendingEmail ? 'Sending...' : 'Resend Email'}
                 </Button>
               )}
               {whatsappEnabled && (
@@ -98,7 +147,7 @@ export function PaymentLinkCreatePage() {
                   <MessageCircle className="h-4 w-4" /> WhatsApp
                 </Button>
               )}
-              <Button variant="outline" size="sm" className="gap-2" onClick={() => window.open(createdLink, '_blank')}>
+              <Button variant="outline" size="sm" className="gap-2" onClick={() => window.open(createdLink.url, '_blank')}>
                 <ExternalLink className="h-4 w-4" /> Open Link
               </Button>
             </div>

@@ -1,14 +1,4 @@
 // Shared payment reconciliation logic.
-//
-// There are (deliberately) two ways this gets triggered for the same
-// payment: the gateway's async webhook (source of truth, works even if the
-// customer closes their browser mid-checkout) and the synchronous
-// redirect/verify flow the browser hits right after paying (faster UX —
-// the invoice can flip to PAID before the webhook round-trip completes).
-// Both call `reconcilePayment` below so there's exactly one code path that
-// writes to `payments` / `invoices` / `payment_links` / `customers`, and the
-// unique constraint on `payments.transactionId` makes it safe to call this
-// twice for the same payment (see the idempotency check first).
 
 import { getSupabaseAdmin } from './supabaseAdmin.js';
 
@@ -154,6 +144,24 @@ export async function reconcilePayment(input) {
       metadata: { gateway, transactionId },
     });
 
+    // Company-wide (userId: null) — a webhook has no specific logged-in
+    // user to attribute this to. Best-effort: a notification write failing
+    // should never undo the payment record we already committed above.
+    try {
+      await supabase.from('notifications').insert({
+        companyId,
+        userId: null,
+        type: 'payment_failed',
+        title: 'Payment failed',
+        message: resolvedInvoice
+          ? `A ${gateway} payment of ₹${amount.toFixed(2)} for invoice ${resolvedInvoice.number || resolvedInvoice.id} failed.`
+          : `A ${gateway} payment of ₹${amount.toFixed(2)} failed.`,
+        data: { gateway, transactionId, invoiceId, paymentLinkId },
+      });
+    } catch (notifyError) {
+      console.error('[reconcilePayment] failed to write payment_failed notification:', notifyError.message);
+    }
+
     return { status: 'recorded-failure', paymentId: failedPayment.id };
   }
 
@@ -177,10 +185,12 @@ export async function reconcilePayment(input) {
     .single();
   if (paymentInsertError) throw paymentInsertError;
 
+  let isPaid = false;
+
   if (resolvedInvoice) {
     const newAmountPaid = parseFloat(resolvedInvoice.amountPaid || 0) + amount;
     const newBalance = Math.max(0, parseFloat(resolvedInvoice.total) - newAmountPaid);
-    const isPaid = newBalance <= 0;
+    isPaid = newBalance <= 0;
 
     const { error: invoiceUpdateError } = await supabase
       .from('invoices')
@@ -203,9 +213,13 @@ export async function reconcilePayment(input) {
     });
 
     if (isPaid) {
+      // totalInvoices is incremented exactly once, at invoice creation time
+      // (see invoiceService.create in the frontend). It must NOT be bumped
+      // again here on payment reconciliation, or every paid invoice would
+      // be double-counted in the customer's invoice count.
       const { data: customer, error: customerError } = await supabase
         .from('customers')
-        .select('totalInvoices, totalRevenue, outstandingAmount')
+        .select('totalRevenue, outstandingAmount')
         .eq('id', resolvedInvoice.customerId)
         .maybeSingle();
       if (customerError) throw customerError;
@@ -213,7 +227,6 @@ export async function reconcilePayment(input) {
         const { error: customerUpdateError } = await supabase
           .from('customers')
           .update({
-            totalInvoices: (customer.totalInvoices || 0) + 1,
             totalRevenue: parseFloat(customer.totalRevenue || 0) + parseFloat(resolvedInvoice.total),
             outstandingAmount: Math.max(0, parseFloat(customer.outstandingAmount || 0) - amount),
           })
@@ -250,6 +263,30 @@ export async function reconcilePayment(input) {
           .eq('id', resolvedLink.customerId);
       }
     }
+  }
+
+  try {
+    if (resolvedInvoice && isPaid) {
+      await supabase.from('notifications').insert({
+        companyId,
+        userId: null,
+        type: 'invoice_paid',
+        title: 'Invoice paid',
+        message: `Invoice ${resolvedInvoice.number || resolvedInvoice.id} was paid in full via ${gateway} (₹${amount.toFixed(2)}).`,
+        data: { gateway, transactionId, invoiceId, amount },
+      });
+    } else if (resolvedLink) {
+      await supabase.from('notifications').insert({
+        companyId,
+        userId: null,
+        type: 'payment_received',
+        title: 'Payment received',
+        message: `A payment of ₹${amount.toFixed(2)} was received via ${gateway}${resolvedLink.title ? ` for "${resolvedLink.title}"` : ''}.`,
+        data: { gateway, transactionId, paymentLinkId, amount },
+      });
+    }
+  } catch (notifyError) {
+    console.error('[reconcilePayment] failed to write payment notification:', notifyError.message);
   }
 
   await supabase.from('activity_logs').insert({

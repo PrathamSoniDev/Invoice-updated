@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Eye, EyeOff, Mail, Lock, Loader2, Shield, User as UserIcon } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const schema = z.object({
@@ -23,9 +23,8 @@ export function LoginPage() {
   const { login, isLoading } = useAuthStore();
   const [showPassword, setShowPassword] = useState(false);
 
-  const { register, handleSubmit, formState: { errors }, setValue } = useForm<FormData>({
+  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { email: 'admin@gmail.com', password: '12345678' },
   });
 
   const onSubmit = async (data: FormData) => {
@@ -34,13 +33,8 @@ export function LoginPage() {
       toast.success('Welcome back to InvoiceGen!');
       navigate('/dashboard');
     } else {
-      toast.error(result.error || 'Invalid credentials. Try the demo accounts below.');
+      toast.error(result.error || 'Invalid credentials. Please try again.');
     }
-  };
-
-  const fillDemo = (email: string, password: string) => {
-    setValue('email', email);
-    setValue('password', password);
   };
 
   return (
@@ -109,32 +103,6 @@ export function LoginPage() {
           )}
         </Button>
       </form>
-
-      <div className="mt-6 space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">Demo Accounts</p>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={() => fillDemo('admin@gmail.com', '12345678')}
-            className="flex flex-col items-start gap-1 rounded-lg border p-3 text-left hover:border-primary/50 hover:bg-primary/5 transition-colors"
-          >
-            <div className="flex items-center gap-1.5 text-sm font-medium">
-              <Shield className="h-3.5 w-3.5 text-primary" /> Admin
-            </div>
-            <p className="text-xs text-muted-foreground">admin@gmail.com</p>
-            <p className="text-xs text-muted-foreground">Password: 12345678</p>
-          </button>
-          <button
-            onClick={() => fillDemo('user@gmail.com', '12345678')}
-            className="flex flex-col items-start gap-1 rounded-lg border p-3 text-left hover:border-primary/50 hover:bg-primary/5 transition-colors"
-          >
-            <div className="flex items-center gap-1.5 text-sm font-medium">
-              <UserIcon className="h-3.5 w-3.5 text-success" /> Business
-            </div>
-            <p className="text-xs text-muted-foreground">user@gmail.com</p>
-            <p className="text-xs text-muted-foreground">Password: 12345678</p>
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

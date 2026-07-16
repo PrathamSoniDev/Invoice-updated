@@ -32,6 +32,32 @@ interface RazorpayResponse {
   razorpay_order_id: string;
   razorpay_signature: string;
 }
+
+// The Razorpay checkout script used to be loaded globally in index.html on
+// every page (including the login screen), which is unnecessary outside of
+// an actual payment flow. It's now loaded on demand, the first time the
+// user actually initiates a Razorpay payment, and cached so repeat payments
+// don't re-fetch it.
+let razorpayScriptPromise: Promise<void> | null = null;
+function loadRazorpayScript(): Promise<void> {
+  if (window.Razorpay) return Promise.resolve();
+  if (razorpayScriptPromise) return razorpayScriptPromise;
+
+  razorpayScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      razorpayScriptPromise = null;
+      reject(new Error('Failed to load Razorpay checkout script'));
+    };
+    document.body.appendChild(script);
+  });
+
+  return razorpayScriptPromise;
+}
+
 export function InvoiceDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -40,11 +66,22 @@ export function InvoiceDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [gatewayDialogOpen, setGatewayDialogOpen] = useState(false);
-  const { company, bank } = useSettingsStore();
+  const { company, bank, gateways, isInitialized: settingsInitialized, isLoading: settingsLoading, fetchSettings } = useSettingsStore();
   const { isModuleEnabled } = useModuleStore();
 
   const emailEnabled = isModuleEnabled('email');
   const whatsappEnabled = isModuleEnabled('whatsapp');
+  // Pay Now should only ever appear if a payment gateway is actually
+  // connected — previously it showed unconditionally whenever the invoice
+  // wasn't paid, even with "Not Connected" gateways, leading to a dead-end
+  // checkout dialog.
+  const paymentGatewayConnected = gateways?.razorpay.status === 'connected' || gateways?.paytm.status === 'connected';
+
+  useEffect(() => {
+    if (!settingsInitialized && !settingsLoading) {
+      fetchSettings();
+    }
+  }, [settingsInitialized, settingsLoading, fetchSettings]);
 
   useEffect(() => {
     invoiceService.get(id!).then((inv) => {
@@ -101,6 +138,14 @@ export function InvoiceDetailsPage() {
 
   const handlePayRazorpay = async () => {
     if (!invoice) return;
+    try {
+      await loadRazorpayScript();
+    } catch (scriptError) {
+      console.error('[InvoiceDetailsPage] Failed to load Razorpay checkout script:', scriptError);
+      toast.error('Could not load the payment gateway. Please check your connection and try again.');
+      return;
+    }
+
     const { data: order } = await axios.post(
       `${API_URL}/payment/create-order`,
       { amount: invoice.total, invoiceId: invoice.id }
@@ -227,7 +272,7 @@ export function InvoiceDetailsPage() {
               <MessageCircle className="h-4 w-4" /> WhatsApp
             </Button>
           )}
-           {invoice.status !== "paid" && (
+           {invoice.status !== "paid" && paymentGatewayConnected && (
         <Button
         size="sm"
           className="gap-2 bg-green-600 hover:bg-green-700"

@@ -27,6 +27,7 @@ const EmailHistoryPage = lazy(() => import('@/modules/communication/Communicatio
 const CommunicationLogsPage = lazy(() => import('@/modules/communication/CommunicationHistory').then((m) => ({ default: m.CommunicationLogsPage })));
 const ReportsPage = lazy(() => import('@/modules/reports/ReportsPage').then((m) => ({ default: m.ReportsPage })));
 const SettingsPage = lazy(() => import('@/modules/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const NotificationsPage = lazy(() => import('@/modules/notifications/NotificationsPage').then((m) => ({ default: m.NotificationsPage })));
 const UserManagementPage = lazy(() => import('@/modules/admin/UserManagementPage').then((m) => ({ default: m.UserManagementPage })));
 const ModuleManagementPage = lazy(() => import('@/modules/admin/ModuleManagementPage').then((m) => ({ default: m.ModuleManagementPage })));
 const AuditLogsPage = lazy(() => import('@/modules/admin/AuditLogsPage').then((m) => ({ default: m.AuditLogsPage })));
@@ -96,6 +97,7 @@ export default function App() {
 
               {/* Settings */}
               <Route path="/settings" element={<ProtectedRoute module="settings"><SettingsPage /></ProtectedRoute>} />
+              <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
               {/* <Route path="/settings/external-integrations" element={<ProtectedRoute module="settings"><ExternalIntegrationsPage /></ProtectedRoute>} /> */}
 
               {/* Admin */}

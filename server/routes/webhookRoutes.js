@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { razorpay } from '../services/razorpayService.js';
 import { verifyChecksum, isPaytmConfigured } from '../services/paytmService.js';
 import { reconcilePayment, methodMappers } from '../services/reconciliationService.js';
+import { getSupabaseAdmin, isSupabaseAdminConfigured } from '../services/supabaseAdmin.js';
 
 const router = Router();
 
@@ -59,6 +60,20 @@ router.post('/razorpay', async (req, res) => {
 
   // Acknowledge immediately-relevant events only; anything else is a no-op
   // 200 so Razorpay stops retrying it.
+  //
+  // account.app.authorization_revoked (Phase D, Razorpay OAuth): fired when
+  // a merchant revokes this app's access to their Razorpay account from
+  // their own Razorpay dashboard (rather than via our "Disconnect" button).
+  // Delivered to the same webhook URL/secret as payment events per
+  // https://razorpay.com/docs/partners/technology-partners/onboard-businesses/integrate-oauth/subscribe-to-webhooks/ —
+  // confirm this against the actual Partner Dashboard application once
+  // created; if Razorpay ends up using a distinct secret for partner/account
+  // events there, split this into its own RAZORPAY_PARTNER_WEBHOOK_SECRET
+  // and verify it before this function is reached.
+  if (event.event === 'account.app.authorization_revoked') {
+    return handleAuthorizationRevoked(event, res);
+  }
+
   if (event.event !== 'payment.captured' && event.event !== 'payment.failed') {
     return res.json({ success: true, ignored: event.event });
   }
@@ -146,6 +161,68 @@ router.post('/paytm', async (req, res) => {
     return res.status(500).json({ success: false, message: 'Reconciliation failed' });
   }
 });
+
+// ============================================================================
+// account.app.authorization_revoked (Phase D, Razorpay OAuth)
+// ============================================================================
+// Payload shape per Razorpay's partner webhook docs:
+//   { event: 'account.app.authorization_revoked', account_id: 'acc_XXXX', contains: [...], created_at: ... }
+// Note this is flatter than the payment.* events above (no payload.*.entity
+// nesting) — confirmed against Razorpay's docs, not assumed.
+async function handleAuthorizationRevoked(event, res) {
+  const accountId = event.account_id;
+  if (!accountId) {
+    return res.status(400).json({ success: false, message: 'Malformed payload: missing account_id' });
+  }
+
+  if (!isSupabaseAdminConfigured()) {
+    console.error('[webhooks/razorpay] authorization_revoked: Supabase admin client not configured.');
+    return res.status(500).json({ success: false, message: 'Server misconfiguration' });
+  }
+
+  try {
+    const adminClient = getSupabaseAdmin();
+
+    const { data: row, error: lookupError } = await adminClient
+      .from('gateway_settings')
+      .select('companyId')
+      .eq('razorpayOauthAccountId', accountId)
+      .maybeSingle();
+
+    if (lookupError) throw lookupError;
+
+    if (!row) {
+      // Nothing on file for this account_id (e.g. already disconnected via
+      // our own "Disconnect" button, which clears razorpayOauthAccountId) —
+      // acknowledge so Razorpay doesn't keep retrying.
+      return res.json({ success: true, ignored: 'no_matching_company' });
+    }
+
+    const { error: clearError } = await adminClient.rpc('clear_razorpay_oauth_tokens', {
+      p_company_id: row.companyId,
+    });
+    if (clearError) throw clearError;
+
+    await adminClient.from('communication_logs').insert({
+      companyId: row.companyId,
+      channel: 'EMAIL',
+      recipient: 'admin',
+      recipientName: 'Company Admin',
+      subject: 'Razorpay was disconnected',
+      body: 'Your Razorpay account owner revoked this app\u2019s access from the Razorpay dashboard. Payments via Razorpay have been paused \u2014 reconnect from Settings \u2192 Payment Gateways whenever you\u2019re ready.',
+      status: 'SENT',
+      relatedType: 'razorpay_oauth',
+      relatedId: row.companyId,
+    });
+
+    console.log(`[webhooks/razorpay] account ${accountId} (company ${row.companyId}) revoked OAuth authorization.`);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('[webhooks/razorpay] authorization_revoked handling failed:', error);
+    // 500 so Razorpay retries — clearing tokens is idempotent, safe to retry.
+    return res.status(500).json({ success: false, message: 'Failed to process revocation' });
+  }
+}
 
 export default router;
 export { parsePaytmOrderId };

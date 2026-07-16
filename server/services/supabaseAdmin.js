@@ -7,6 +7,14 @@
 // The service-role key bypasses Row Level Security entirely.
 
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
+
+// supabase-js always spins up a realtime client internally, even though
+// nothing on this server uses realtime subscriptions — on Node versions
+// without a native global WebSocket (<22) that init throws. Passing `ws`
+// (Node's standard WebSocket implementation) as the transport avoids that
+// entirely, regardless of Node version.
+const REALTIME_OPTIONS = { transport: WebSocket };
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -35,6 +43,7 @@ export function getSupabaseAdmin() {
 
   client = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
+    realtime: REALTIME_OPTIONS,
   });
   return client;
 }

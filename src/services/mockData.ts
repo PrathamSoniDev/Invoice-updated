@@ -273,9 +273,6 @@ export const mockTemplates: MessageTemplate[] = [
     body: 'Hello {{customer_name}}, this is a friendly reminder that your invoice {{invoice_number}} for {{amount}} is due on {{due_date}}. Please process the payment at your earliest convenience.',
     variables: ['customer_name', 'invoice_number', 'amount', 'due_date'],
     createdAt: randomDate(90),
-    isDefault: false,
-    isActive: false,
-    updatedAt: ''
   },
   {
     id: 'tpl_0002',
@@ -285,9 +282,6 @@ export const mockTemplates: MessageTemplate[] = [
     body: 'Dear {{customer_name}}, please find your invoice {{invoice_number}} attached. The total amount due is {{amount}} with a due date of {{due_date}}. Thank you for your business.',
     variables: ['customer_name', 'invoice_number', 'amount', 'due_date'],
     createdAt: randomDate(80),
-    isDefault: false,
-    isActive: false,
-    updatedAt: ''
   },
   {
     id: 'tpl_0003',
@@ -297,9 +291,6 @@ export const mockTemplates: MessageTemplate[] = [
     body: 'Hi {{customer_name}}! Welcome to InvoiceGen. We are excited to have you on board. If you have any questions, feel free to reach out.',
     variables: ['customer_name'],
     createdAt: randomDate(70),
-    isDefault: false,
-    isActive: false,
-    updatedAt: ''
   },
   {
     id: 'tpl_0004',
@@ -309,9 +300,6 @@ export const mockTemplates: MessageTemplate[] = [
     body: 'Dear {{customer_name}}, we have received your payment of {{amount}} for invoice {{invoice_number}}. Thank you for your prompt payment.',
     variables: ['customer_name', 'invoice_number', 'amount'],
     createdAt: randomDate(60),
-    isDefault: false,
-    isActive: false,
-    updatedAt: ''
   },
   {
     id: 'tpl_0005',
@@ -321,9 +309,6 @@ export const mockTemplates: MessageTemplate[] = [
     body: 'Hi {{customer_name}}, your invoice {{invoice_number}} for {{amount}} is overdue. Please make the payment immediately to avoid late fees.',
     variables: ['customer_name', 'invoice_number', 'amount'],
     createdAt: randomDate(50),
-    isDefault: false,
-    isActive: false,
-    updatedAt: ''
   },
 ];
 

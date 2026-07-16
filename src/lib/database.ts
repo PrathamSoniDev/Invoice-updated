@@ -72,6 +72,50 @@ export function buildSearchQuery(query: any, searchTerm: string, fields: string[
   return query.or(searchConditions.join(','));
 }
 
+// PostgREST's `.or()` filter string uses commas to separate conditions and
+// parentheses for logical grouping. A raw search term containing either
+// would silently corrupt the filter (dropped/misparsed conditions) rather
+// than throwing, so we strip them before they ever reach `.or(...)`.
+export function sanitizeSearchTerm(searchTerm: string | undefined | null): string {
+  if (!searchTerm) return '';
+  return searchTerm.trim().replace(/[,()]/g, '');
+}
+
+// Cross-table search helper: several list views (invoices, payment links)
+// join `customers` for display but PostgREST's embedded-resource filters
+// don't reliably narrow the parent rows. Instead, resolve which customers
+// match the search term first, then fold those ids into the parent query's
+// own `.or()` filter via `customerId.in.(...)`. This is what lets "search
+// every parameter" reach fields that live on the joined customer row (name,
+// business name, email, mobile, GSTIN, city, etc.) as well as the parent's
+// own columns.
+export async function findMatchingCustomerIds(companyId: string, searchTerm: string): Promise<string[]> {
+  if (!searchTerm) return [];
+
+  const { data, error } = await supabase
+    .from('customers')
+    .select('id')
+    .eq('companyId', companyId)
+    .is('deletedAt', null)
+    .or(
+      [
+        `name.ilike.%${searchTerm}%`,
+        `businessName.ilike.%${searchTerm}%`,
+        `email.ilike.%${searchTerm}%`,
+        `mobile.ilike.%${searchTerm}%`,
+        `whatsapp.ilike.%${searchTerm}%`,
+        `gstNumber.ilike.%${searchTerm}%`,
+        `billingCity.ilike.%${searchTerm}%`,
+        `billingState.ilike.%${searchTerm}%`,
+        `billingPincode.ilike.%${searchTerm}%`,
+      ].join(','),
+    )
+    .limit(200);
+
+  if (error) throw error;
+  return (data || []).map((row: { id: string }) => row.id);
+}
+
 // Format date for queries
 export function formatDateForQuery(date: Date | string): string {
   if (typeof date === 'string') return date;

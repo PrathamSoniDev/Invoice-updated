@@ -4,14 +4,10 @@ import { useThemeStore } from '@/store/themeStore';
 import { useUIStore } from '@/store/uiStore';
 import { useAuthStore } from '@/store/authStore';
 import { searchIndex, type SearchResult } from '@/store/searchIndexStore';
+import { notificationService } from '@/services/notificationService';
+import type { Notification } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-
-import { notificationService } from "@/services/notificationService";
-import type { Notification } from "@/types";
-import { formatDate } from "@/utils";
-import { toast } from "sonner";
-
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,7 +19,7 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Menu, Search, Sun, Moon, Bell, User, Settings, LogOut, ChevronDown, FileText, Users, CreditCard, ArrowRight } from 'lucide-react';
-import { getInitials } from '@/utils';
+import { getInitials, timeAgo } from '@/utils';
 
 const RESULT_ICON = {
   invoice: FileText,
@@ -45,40 +41,44 @@ export function TopNavbar() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const loadNotifications = async () => {
+    try {
+      const [latest, count] = await Promise.all([
+        notificationService.getLatest(3),
+        notificationService.getUnreadCount(),
+      ]);
+      setNotifications(latest);
+      setUnreadCount(count);
+    } catch (err) {
+      // Non-critical — the bell just stays empty/quiet rather than blocking anything.
+      console.error('[TopNavbar] failed to load notifications:', err instanceof Error ? err.message : err);
+    }
+  };
 
   useEffect(() => {
     loadNotifications();
+    // Light polling so the bell reflects new payment/invoice events without
+    // needing a full realtime subscription for a low-frequency feature.
+    const interval = setInterval(loadNotifications, 60_000);
+    return () => clearInterval(interval);
   }, []);
 
-  async function loadNotifications() {
-    try {
-      const data = await notificationService.getLatest(3);
-      setNotifications(data);
-    } catch (err) {
-      console.error(err);
+  const handleNotificationClick = async (notification: Notification) => {
+    if (!notification.isRead) {
+      try {
+        await notificationService.markAsRead(notification.id);
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === notification.id ? { ...n, isRead: true } : n)),
+        );
+        setUnreadCount((c) => Math.max(0, c - 1));
+      } catch (err) {
+        console.error('[TopNavbar] failed to mark notification read:', err instanceof Error ? err.message : err);
+      }
     }
-  }
-
-  async function handleRead(id: string) {
-    try {
-      await notificationService.markAsRead(id);
-
-      setNotifications((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                isRead: true,
-                readAt: new Date().toISOString(),
-              }
-            : item
-        )
-      );
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to update notification");
-    }
-  }
+    navigate('/notifications');
+  };
 
   // Cmd/Ctrl+K focuses the search box from anywhere in the app.
   useEffect(() => {
@@ -182,11 +182,11 @@ export function TopNavbar() {
         </Button>
 
         {/* Notifications */}
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={(isOpen) => { if (isOpen) loadNotifications(); }}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="relative h-9 w-9">
               <Bell className="h-[18px] w-[18px]" />
-              {notifications.some((n) => !n.isRead) && (
+              {unreadCount > 0 && (
                 <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive ring-2 ring-background" />
               )}
             </Button>
@@ -194,43 +194,35 @@ export function TopNavbar() {
           <DropdownMenuContent align="end" className="w-80">
             <DropdownMenuLabel className="flex items-center justify-between">
               <span>Notifications</span>
-               <Badge variant="secondary" className="text-xs">
-                {notifications.filter((n) => !n.isRead).length} new
-              </Badge>
+              {unreadCount > 0 && (
+                <Badge variant="secondary" className="text-xs">{unreadCount} new</Badge>
+              )}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {notifications.map((notif) => (
-              <DropdownMenuItem
-                key={notif.id}
-                className="flex flex-col items-start gap-1 py-2.5"
-                onClick={() => handleRead(notif.id)}
-              >
-                <div className="flex w-full items-center justify-between">
-                  <span
-                    className={`text-sm ${
-                      !notif.isRead ? "font-semibold" : "font-medium"
-                    }`}
-                  >
-                    {notif.title}
-                  </span>
-
-                  <span className="text-xs text-muted-foreground">
-                    {formatDate(notif.createdAt, "short")}
-                  </span>
-                </div>
-
-                <span className="text-xs text-muted-foreground">
-                  {notif.message}
-                </span>
-              </DropdownMenuItem>
-            ))}
-            {notifications.length === 0 && (
-              <div className="py-6 text-center text-sm text-muted-foreground">
-                No notifications found
+            {notifications.length === 0 ? (
+              <div className="px-3 py-6 text-sm text-muted-foreground text-center">
+                You're all caught up.
               </div>
+            ) : (
+              notifications.map((notif) => (
+                <DropdownMenuItem
+                  key={notif.id}
+                  className="flex flex-col items-start gap-1 py-2.5 cursor-pointer"
+                  onSelect={(e) => { e.preventDefault(); handleNotificationClick(notif); }}
+                >
+                  <div className="flex w-full items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
+                      {!notif.isRead && <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />}
+                      {notif.title}
+                    </span>
+                    <span className="text-xs text-muted-foreground shrink-0">{timeAgo(notif.createdAt)}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{notif.message}</span>
+                </DropdownMenuItem>
+              ))
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="justify-center text-sm text-primary" onClick={() => navigate("/notifications")}>
+            <DropdownMenuItem className="justify-center text-sm text-primary cursor-pointer" onClick={() => navigate('/notifications')}>
               View all notifications
             </DropdownMenuItem>
           </DropdownMenuContent>

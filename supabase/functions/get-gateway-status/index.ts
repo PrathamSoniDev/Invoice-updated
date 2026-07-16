@@ -11,13 +11,23 @@
 //
 // Response (JSON): 200
 //   {
-//     razorpay: { enabled, keyId, webhookSecret, upiId, keySecretPreview },
+//     razorpay: { enabled, keyId, webhookSecret, upiId, keySecretPreview,
+//                 connectionMethod: 'manual' | 'oauth',
+//                 oauth: null | { accountId, connected, expiresAt, reconnectNeeded } },
 //     paytm:    { enabled, merchantId, environment, upiId, merchantKeyPreview },
 //   }
 // (webhookSecret is intentionally still returned in full for now — it's used
 // to display/copy the webhook URL config, not treated as the primary
 // merchant secret. It can be masked the same way as the key secrets later
 // if desired.)
+//
+// Phase E (Razorpay OAuth): `razorpay.oauth` is null when connectionMethod
+// is 'manual' (nothing to report). When connectionMethod is 'oauth', it
+// never includes a token value — only enough for the Settings page to show
+// a "reconnect needed" banner: `reconnectNeeded` is true if the stored
+// access token has already expired (the daily refresh cron in Phase C
+// failed to renew it, e.g. because the refresh token itself was revoked/
+// expired) or is missing entirely.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -99,7 +109,7 @@ Deno.serve(async (req: Request) => {
   const { data: settings, error: settingsError } = await adminClient
     .from('gateway_settings')
     .select(
-      'razorpayEnabled, razorpayKeyId, razorpayWebhook, razorpayUpiId, paytmEnabled, paytmMerchantId, paytmEnvironment, paytmUpiId',
+      'razorpayEnabled, razorpayKeyId, razorpayWebhook, razorpayUpiId, razorpayConnectionMethod, razorpayOauthAccountId, razorpayOauthAccessTokenExpiresAt, paytmEnabled, paytmMerchantId, paytmEnvironment, paytmUpiId',
     )
     .eq('companyId', companyId)
     .maybeSingle();
@@ -130,6 +140,9 @@ Deno.serve(async (req: Request) => {
     console.error('[get-gateway-status] paytm preview failed:', paytmPreviewResult.error.message);
   }
 
+  const connectionMethod = (settings?.razorpayConnectionMethod ?? 'manual') as 'manual' | 'oauth';
+  const oauthExpiresAt = settings?.razorpayOauthAccessTokenExpiresAt ?? null;
+
   return json(
     {
       razorpay: {
@@ -138,6 +151,16 @@ Deno.serve(async (req: Request) => {
         webhookSecret: settings?.razorpayWebhook ?? '',
         upiId: settings?.razorpayUpiId ?? '',
         keySecretPreview: razorpayPreviewResult.data ?? null,
+        connectionMethod,
+        oauth:
+          connectionMethod === 'oauth'
+            ? {
+                accountId: settings?.razorpayOauthAccountId ?? null,
+                connected: Boolean(settings?.razorpayEnabled),
+                expiresAt: oauthExpiresAt,
+                reconnectNeeded: !oauthExpiresAt || new Date(oauthExpiresAt).getTime() <= Date.now(),
+              }
+            : null,
       },
       paytm: {
         enabled: settings?.paytmEnabled ?? false,
