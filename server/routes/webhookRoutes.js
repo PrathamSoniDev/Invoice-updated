@@ -7,20 +7,13 @@ import { getSupabaseAdmin, isSupabaseAdminConfigured } from '../services/supabas
 
 const router = Router();
 
-// Mirrors src/services/paytmClient.ts's buildPaytmOrderId/parsePaytmOrderId —
-// Paytm order IDs are client-chosen (unlike Razorpay, which assigns its own),
-// so this app embeds which invoice/payment-link the order is for directly in
-// the order ID: "INV_<id>_<timestamp>" or "LNK_<id>_<timestamp>". Keep this
-// regex in sync with paytmClient.ts if that format ever changes.
 function parsePaytmOrderId(orderId) {
   const match = String(orderId || '').match(/^(INV|LNK)_(.+)_(\d+)$/);
   if (!match) return null;
   return { type: match[1] === 'INV' ? 'invoice' : 'link', entityId: match[2] };
 }
 
-// ============================================================================
-// POST /api/webhooks/razorpay
-// ============================================================================
+
 // Registered in server/index.js with express.raw({ type: 'application/json' })
 // scoped to this path — req.body arrives here as a Buffer so the HMAC is
 // computed over the exact bytes Razorpay signed, not a re-serialized copy.
@@ -58,18 +51,6 @@ router.post('/razorpay', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Invalid JSON' });
   }
 
-  // Acknowledge immediately-relevant events only; anything else is a no-op
-  // 200 so Razorpay stops retrying it.
-  //
-  // account.app.authorization_revoked (Phase D, Razorpay OAuth): fired when
-  // a merchant revokes this app's access to their Razorpay account from
-  // their own Razorpay dashboard (rather than via our "Disconnect" button).
-  // Delivered to the same webhook URL/secret as payment events per
-  // https://razorpay.com/docs/partners/technology-partners/onboard-businesses/integrate-oauth/subscribe-to-webhooks/ —
-  // confirm this against the actual Partner Dashboard application once
-  // created; if Razorpay ends up using a distinct secret for partner/account
-  // events there, split this into its own RAZORPAY_PARTNER_WEBHOOK_SECRET
-  // and verify it before this function is reached.
   if (event.event === 'account.app.authorization_revoked') {
     return handleAuthorizationRevoked(event, res);
   }
@@ -113,9 +94,7 @@ router.post('/razorpay', async (req, res) => {
   }
 });
 
-// ============================================================================
-// POST /api/webhooks/paytm
-// ============================================================================
+
 // Paytm's checksum is computed over the parsed field set (not raw bytes), so
 // this route can use the normal express.json()/urlencoded() body already
 // parsed by the global middleware in server/index.js.
@@ -162,9 +141,7 @@ router.post('/paytm', async (req, res) => {
   }
 });
 
-// ============================================================================
-// account.app.authorization_revoked (Phase D, Razorpay OAuth)
-// ============================================================================
+
 // Payload shape per Razorpay's partner webhook docs:
 //   { event: 'account.app.authorization_revoked', account_id: 'acc_XXXX', contains: [...], created_at: ... }
 // Note this is flatter than the payment.* events above (no payload.*.entity
