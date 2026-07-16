@@ -6,38 +6,12 @@ import { sendPaymentLinkEmail } from '../services/emailService.js';
 
 const router = Router();
 
-/**
- * Basic email format check. This is a lightweight guard — Resend performs
- * its own validation, but rejecting obviously bad input early gives the
- * caller a clean 400 instead of a confusing upstream error.
- *
- * @param {string} email
- * @returns {boolean}
- */
+
 function isValidEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
-/**
- * POST /api/payment-links/send
- *
- * Request body:
- *   {
- *     "customerEmail": "buyer@example.com",
- *     "customerName": "Jane Doe",
- *     "paymentLink": {
- *       "linkId": "AbCdEf123456",
- *       "amount": 5000,
- *       "currency": "INR",
- *       "url": "https://.../pay/AbCdEf123456",
- *       "expiryDate": "2026-08-15",
- *       "description": "Consulting services"
- *     }
- *   }
- *
- * Success response (200):
- *   { "success": true, "message": "Payment link sent successfully" }
- */
+
 router.post('/send', async (req, res) => {
   console.log('[paymentLinkRoutes] POST /send received:', {
     customerEmail: req.body?.customerEmail,
