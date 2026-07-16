@@ -61,17 +61,7 @@ router.post("/verify", async (req, res) => {
       });
     }
 
-    // Reconcile immediately, on the same code path the /api/webhooks/razorpay
-    // webhook uses, rather than trusting a client-supplied invoiceId — pull
-    // invoiceId/paymentLinkId from the order's own notes (set server-side in
-    // /create-order above) and the payment's real amount/method from
-    // Razorpay's API, not from the request body. This also means a customer
-    // can't pay for a ₹1 order and claim it was for a ₹50,000 invoice by
-    // tampering with the client.
-    //
-    // If this throws or the webhook hasn't landed yet, no harm done: the
-    // webhook is idempotent and will (re)reconcile independently once it
-    // arrives — this call is purely a same-request UX speedup.
+    
     try {
       const [order, payment] = await Promise.all([
         razorpay.orders.fetch(razorpay_order_id),
