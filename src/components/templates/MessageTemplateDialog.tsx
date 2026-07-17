@@ -49,6 +49,7 @@ export function MessageTemplateDialog({
     "due_date",
     "company_name",
     "payment_link",
+    "login_link"
   ];
 
   useEffect(() => {
@@ -140,16 +141,27 @@ export function MessageTemplateDialog({
               rows={8}
               value={body}
               onChange={(e) => setBody(e.target.value)}
+              placeholder="Dear {{customer_name}},
+
+Your invoice {{invoice_number}} of ₹{{amount}}
+is due on {{due_date}}.
+
+Thanks,
+{{company_name}}"
             />
+            <p className="text-xs opacity-70">Use {"{{variable_name}}"} in Subject or Message. It will be replaced automatically when the email is sent.</p>
           </div>
 
           <div className="space-y-2">
-            <Label>Variables</Label>
-            <Input 
+            <Label>Available Variables</Label>
+            <Input className="hidden"
               disabled
-              placeholder="customer_name, invoice_number, amount, due_date, company_name, payment_link"
+              placeholder="customer_name, invoice_number, amount, due_date, company_name, payment_link, login_link"
               value={TEMPLATE_VARIABLES.join(", ")}
             />
+            <div className="flex flex-wrap gap-2">
+              {TEMPLATE_VARIABLES.map((t, idx)=> <span key={idx} className="px-2 py-1 text-sm rounded bg-violet-100 text-violet-700 cursor-pointer">{`{{${t}}}`}</span>)}
+            </div>
           </div>
 
         </div>

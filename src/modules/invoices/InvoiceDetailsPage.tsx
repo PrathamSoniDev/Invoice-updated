@@ -70,6 +70,7 @@ export function InvoiceDetailsPage() {
         customerEmail: invoice.customerEmail,
         customerName: invoice.customerName,
         invoice: {
+          id: invoice.id,
           number: invoice.number,
           lineItems: invoice.lineItems.map((item) => ({
             description: item.description,

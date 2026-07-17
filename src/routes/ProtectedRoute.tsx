@@ -15,13 +15,13 @@ export function ProtectedRoute({ children, module, adminOnly }: ProtectedRoutePr
   const { isAuthenticated } = useAuthStore();
   const { isModuleEnabled } = useModuleStore();
   const { user } = useAuthStore();
-  console.log("========== ProtectedRoute ==========");
-  console.log("Authenticated:", isAuthenticated);
-  console.log("User:", user);
-  console.log("Role:", user?.role);
-  console.log("Permissions:", user?.permissions);
-  console.log("Module:", module);
-  console.log("Admin Only:", adminOnly);
+  // console.log("========== ProtectedRoute ==========");
+  // console.log("Authenticated:", isAuthenticated);
+  // console.log("User:", user);
+  // console.log("Role:", user?.role);
+  // console.log("Permissions:", user?.permissions);
+  // console.log("Module:", module);
+  // console.log("Admin Only:", adminOnly);
 
 
   if (!isAuthenticated) {
@@ -61,7 +61,7 @@ if (
   return <ModuleDisabled moduleName={module} />;
 }
 
-console.log(" Route allowed");
+// console.log(" Route allowed");
 
   return <>{children}</>;
 }

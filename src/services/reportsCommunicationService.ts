@@ -237,40 +237,71 @@ export const reportsService = {
     }));
   },
 
-  async getFinancialSummary(_params?: any): Promise<any> {
+  async getFinancialSummary(params?: { dateRange?: string }): Promise<any> {
     const companyId = await getCurrentCompanyId();
 
-    const { data: invoices } = await supabase
-      .from("invoices")
-      .select("status, total, taxAmount, balance")
-      .eq("companyId", companyId)
-      .is("deletedAt", null);
+    let invoiceQuery = supabase
+      .from('invoices')
+      .select('status, total, taxAmount, balance, issueDate')
+      .eq('companyId', companyId)
+      .is('deletedAt', null);
 
-    const { data: payments } = await supabase
-      .from("payments")
-      .select("amount, status")
-      .eq("companyId", companyId);
+    let paymentQuery = supabase
+      .from('payments')
+      .select('amount, status, date')
+      .eq('companyId', companyId);
+
+    // Apply date filter
+    if (params?.dateRange) {
+      const from = new Date();
+
+      switch (params.dateRange) {
+        case '7d':
+          from.setDate(from.getDate() - 7);
+          break;
+        case '30d':
+          from.setDate(from.getDate() - 30);
+          break;
+        case '3m':
+          from.setMonth(from.getMonth() - 3);
+          break;
+        case '6m':
+          from.setMonth(from.getMonth() - 6);
+          break;
+        case '12m':
+          from.setMonth(from.getMonth() - 12);
+          break;
+      }
+
+      invoiceQuery = invoiceQuery.gte('issueDate', from.toISOString());
+      paymentQuery = paymentQuery.gte('date', from.toISOString());
+    }
+
+    const [{ data: invoices }, { data: payments }] = await Promise.all([
+      invoiceQuery,
+      paymentQuery,
+    ]);
 
     const totalRevenue = (invoices || [])
-      .filter((i) => i.status === "PAID")
-      .reduce((sum, i) => sum + parseFloat(i.total || "0"), 0);
+      .filter((i) => i.status === 'PAID')
+      .reduce((sum, i) => sum + parseFloat(i.total || '0'), 0);
 
     const totalTax = (invoices || []).reduce(
-      (sum, i) => sum + parseFloat(i.taxAmount || "0"),
+      (sum, i) => sum + parseFloat(i.taxAmount || '0'),
       0,
     );
 
     const totalPayments = (payments || [])
-      .filter((p) => p.status === "PAID")
-      .reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
+      .filter((p) => p.status === 'PAID')
+      .reduce((sum, p) => sum + parseFloat(p.amount || '0'), 0);
 
     return {
       totalRevenue,
       totalTax,
       totalPayments,
       pendingRevenue: (invoices || [])
-        .filter((i) => ["SENT", "VIEWED", "OVERDUE"].includes(i.status))
-        .reduce((sum, i) => sum + parseFloat(i.balance || "0"), 0),
+        .filter((i) => ['SENT', 'VIEWED', 'OVERDUE'].includes(i.status))
+        .reduce((sum, i) => sum + parseFloat(i.balance || '0'), 0),
     };
   },
 
