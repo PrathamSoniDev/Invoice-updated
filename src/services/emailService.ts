@@ -14,6 +14,7 @@ export interface SendInvoiceEmailInput {
   customerEmail: string;
   customerName: string;
   invoice: {
+    id: string,
     number: string;
     lineItems: Array<{
       description?: string;

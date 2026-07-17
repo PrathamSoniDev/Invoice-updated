@@ -74,6 +74,7 @@ const dateRangeLabels: Record<string, string> = {
   '7d': 'Last 7 days',
   '30d': 'Last 30 days',
   '3m': 'Last 3 months',
+  '6m': 'Last 6 months',
   '12m': 'Last 12 months',
 };
 
@@ -83,6 +84,13 @@ export function ReportsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { user } = useAuthStore();
   const { company } = useSettingsStore();
+
+  const months =
+  dateRange === "7d" ? 1 :
+  dateRange === "30d" ? 1 :
+  dateRange === "3m" ? 3 : 
+  dateRange === "6m" ? 6 :
+  12;
 
   const [summary, setSummary] = useState({
     totalRevenue: 0,
@@ -157,9 +165,10 @@ export function ReportsPage() {
   const loadReportData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [summaryData, revenue, invoicesData, customersData, paymentsData] = await Promise.all([
+      const [summaryData, invoiceTrendData, revenue, invoicesData, customersData, paymentsData] = await Promise.all([
         reportsApi.getFinancialSummary({ dateRange }).catch(() => null),
-        dashboardApi.getChartData('revenue-trend').catch(() => ({ data: [] })),
+        dashboardApi.getChartData("invoice-trend", months).catch(() => ({ data: [] })),
+        dashboardApi.getChartData('revenue-trend', months).catch(() => ({ data: [] })),
         invoiceService.list({ limit: 100 }).catch(() => ({ data: [] })),
         customerService.list({ limit: 100 }).catch(() => ({ data: [] })),
         paymentService.listPayments({ limit: 100 }).catch(() => ({ data: [] })),
@@ -168,14 +177,14 @@ export function ReportsPage() {
       if (summaryData) {
         setSummary({
           totalRevenue: summaryData.totalRevenue || 0,
-          paidRevenue: summaryData.paidRevenue || 0,
-          outstanding: summaryData.outstanding || 0,
-          overdueAmount: summaryData.overdueAmount || 0,
-        });
+          paidRevenue: summaryData.totalPayments || 0,
+          outstanding: summaryData.pendingRevenue || 0,
+          overdueAmount: summaryData.totalTax || 0,
+        });        
       }
 
       setRevenueTrend(revenue?.data || []);
-      setInvoiceTrend(revenue?.data || []);
+      setInvoiceTrend(invoiceTrendData?.data || []);
       setInvoices(invoicesData.data || []);
       setCustomers(customersData.data || []);
       setPayments(paymentsData.data || []);
@@ -226,14 +235,14 @@ export function ReportsPage() {
           { key: 'revenue', label: 'Revenue' },
           { key: 'created', label: 'Invoices Created' },
           { key: 'paid', label: 'Invoices Paid' },
-        ],
-        rows: revenueTrend.map((point) => ({
-          label: String(point.label ?? ''),
-          revenue: formatCurrency(Number(point.value ?? 0)),
-          created: Number(point.created ?? 0),
-          paid: Number(point.paid ?? 0),
-        })),
-        chartData: revenueTrend.map((point) => ({ label: String(point.label ?? ''), value: Number(point.value ?? 0) })),
+        ],        
+      rows: revenueTrend.map((rev, index) => ({
+          label: rev.month,
+          revenue: formatCurrency(rev.revenue),
+          created: invoiceTrend[index]?.created ?? 0,
+          paid: invoiceTrend[index]?.paid ?? 0,
+      })),
+        chartData: revenueTrend.map((point) => ({ label: String(point.month ?? ''), value: Number(point.revenue ?? 0) })),
       },
       invoices: {
         ...base,
@@ -365,6 +374,7 @@ export function ReportsPage() {
                 <SelectItem value="7d">Last 7 days</SelectItem>
                 <SelectItem value="30d">Last 30 days</SelectItem>
                 <SelectItem value="3m">Last 3 months</SelectItem>
+                <SelectItem value="6m">Last 6 months</SelectItem>
                 <SelectItem value="12m">Last 12 months</SelectItem>
               </SelectContent>
             </Select>
@@ -385,7 +395,7 @@ export function ReportsPage() {
         <StatCard title="Total Revenue" value={formatCurrency(summary.totalRevenue)} icon={Wallet} accent="primary" />
         <StatCard title="Paid Revenue" value={formatCurrency(summary.paidRevenue)} icon={TrendingUp} accent="success" />
         <StatCard title="Outstanding" value={formatCurrency(summary.outstanding)} icon={Clock} accent="warning" />
-        <StatCard title="Overdue Amount" value={formatCurrency(summary.overdueAmount)} icon={AlertTriangle} accent="destructive" />
+        <StatCard title="Overdue Amount" value={formatCurrency(summary.overdueAmount)} icon={AlertTriangle} accent="destructive" />       
       </div>
 
       {/* Tabs for different report types */}
@@ -409,11 +419,11 @@ export function ReportsPage() {
                       <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />                  
+                  <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
                   <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `${v / 1000}k`} />
                   <Tooltip contentStyle={chartTooltipStyle} formatter={(value: number) => formatCurrency(value)} />
-                  <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#reportRevenueGradient)" name="Revenue" />
+                  <Area type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#reportRevenueGradient)" name="Revenue" />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartWrapper>
@@ -421,8 +431,8 @@ export function ReportsPage() {
             <ChartWrapper title="Invoice Trend" description={dateRangeLabel} icon={FileText}>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={invoiceTrend} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />                                  
+                  <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
                   <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
                   <Tooltip contentStyle={chartTooltipStyle} />
                   <Legend />
