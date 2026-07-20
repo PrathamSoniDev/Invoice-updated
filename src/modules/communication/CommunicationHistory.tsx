@@ -5,12 +5,15 @@ import { DataTable, type Column } from '@/components/common/DataTable';
 import { Pagination } from '@/components/common/Pagination';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { CommunicationStatusBadge } from '@/components/common/StatusBadge';
 import { communicationService } from '@/services';
 import type { CommunicationLog, CommunicationChannel, MessageTemplate } from '@/types';
 import { formatDateTime } from '@/utils';
 import { MessageCircle, Mail, MessageSquare, FileText, Plus } from 'lucide-react';
 import { toast } from 'sonner';
+
+import { MessageTemplateDialog } from "@/components/templates/MessageTemplateDialog";
 
 interface CommunicationHistoryProps {
   channel: CommunicationChannel;
@@ -31,6 +34,92 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const limit = 10;
 
+  const [editingTemplate, setEditingTemplate] = useState<MessageTemplate | null>(null);
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false);
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<MessageTemplate | null>(null);
+
+  const loadTemplates = async () => {
+    try {
+      const data = await communicationService.listTemplates();
+      setTemplates(
+        data.filter((t) => t.channel === channel)
+      );
+    } catch {
+      setTemplates([]);
+    }
+  };  
+
+  const handleSetDefault = async (id: string) => {
+    try {
+      await communicationService.setDefaultTemplate(id);
+
+      const updated = await communicationService.listTemplates();
+
+      setTemplates(updated.filter((t) => t.channel === channel));
+
+      toast.success("Default template updated");
+    } catch {
+      toast.error("Failed to update default template");
+    }
+  };
+
+  const handleSetActive = async (id: string) => {
+    try {
+      await communicationService.setActiveTemplate(id);
+
+      const updated = await communicationService.listTemplates();
+
+      setTemplates(updated.filter((t) => t.channel === channel));
+
+      toast.success("Active template updated");
+    } catch {
+      toast.error("Failed to update active template");
+    }
+  };
+
+  const handleUpdateTemplate = async (
+    id: string,
+    data: Omit<MessageTemplate, "id" | "createdAt">
+  ) => {
+    try {
+      await communicationService.updateTemplate(id, data);
+
+      const updated = await communicationService.listTemplates();
+
+      setTemplates(updated.filter((t) => t.channel === channel));
+
+      toast.success("Template updated successfully");
+    } catch {
+      toast.error("Failed to update template");
+    }
+  };
+
+  const handleDeleteTemplate = async (id: string) => {
+    try {
+      const template: MessageTemplate | undefined = templates.find((t) => t.id === id)
+      
+      if (template?.isDefault) {
+        toast.error("Please select another default template first.");
+        return;
+      }
+
+      if (template?.isActive) {
+        toast.error("Please activate another template first.");
+        return;
+      }
+
+      await communicationService.deleteTemplate(id);
+
+      setTemplates((prev) => prev.filter((t) => t.id !== id));
+
+      toast.success("Template deleted"); 
+    } catch {
+      toast.error("Failed to delete template");
+    }
+  };
+
   useEffect(() => {
     setLoading(true);
     communicationService.listLogs({ search, channel, status: statusFilter, page, limit }).then((res) => {
@@ -42,9 +131,7 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
   }, [search, statusFilter, page, channel]);
 
   useEffect(() => {
-    communicationService.listTemplates().then((t) => {
-      setTemplates(t.filter((tpl) => tpl.channel === channel));
-    }).catch(() => setTemplates([]));
+    loadTemplates();
   }, [channel]);
 
   const channelTemplates = templates;
@@ -99,20 +186,67 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
         <Card className="shadow-soft">
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <CardTitle className="text-base">Message Templates</CardTitle>
-            <Button size="sm" variant="outline" className="gap-2" onClick={() => toast.info('Template editor would open')}>
+            <Button size="sm" variant="outline" className="gap-2" onClick={() => {
+                  setSelectedTemplate(null);
+                  setDialogOpen(true);
+                }}>
                 <Plus className="h-4 w-4" /> New Template
               </Button>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {channelTemplates.map((tpl) => (
-                <div key={tpl.id} className="rounded-lg border p-4 hover:shadow-soft transition-shadow">
+                <div key={tpl.id} className="rounded-lg border p-4 hover:shadow-soft transition-shadow">   
+                  <div className="flex items-center justify-between mb-3 gap-2">
+                      {tpl.isDefault ? (
+                        <Badge variant="default">Default</Badge>  
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleSetDefault(tpl.id)}
+                        >
+                          Set Default
+                        </Button>
+                      )}
+                       {tpl.isActive ? (                      
+                        <Badge variant="secondary">Active</Badge> 
+                      ) : (                        
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleSetActive(tpl.id)}
+                        >
+                          Set Active
+                        </Button>
+                      )}
+                  </div> 
                   <p className="text-sm font-semibold mb-1">{tpl.name}</p>
                   <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{tpl.body}</p>
                   <div className="flex flex-wrap gap-1">
                     {tpl.variables.map((v: string) => (
                       <span key={v} className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-mono">{`{{${v}}}`}</span>
                     ))}
+                  </div>                                 
+                  <div className="flex justify-end gap-2 mt-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setEditingTemplate(tpl);
+                        setShowTemplateDialog(true);
+                      }}
+                    >
+                      Edit
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => handleDeleteTemplate(tpl.id)}
+                    >
+                      Delete
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -153,6 +287,53 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
         />
         <Pagination page={page} totalPages={totalPages} total={total} limit={limit} onPageChange={setPage} />
       </Card>
+
+
+       <MessageTemplateDialog
+      open={showTemplateDialog}
+      onOpenChange={(open) => {
+        setShowTemplateDialog(open);
+
+        if (!open) {
+          setEditingTemplate(null);
+        }
+      }}
+      template={editingTemplate}
+      channel={channel}
+      onSave={async (data) => {
+        if (!editingTemplate) return;
+
+        await handleUpdateTemplate(editingTemplate.id, data);
+
+        setShowTemplateDialog(false);
+        setEditingTemplate(null);
+      }}
+    />
+    
+      <MessageTemplateDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        channel={channel}
+        template={selectedTemplate}
+        onSave={async (data) => {
+          const channelTemplates = templates.filter(t => t.channel === channel);
+
+          if (!editingTemplate && channelTemplates.length >= 2) {
+            toast.error(`You can only create 2 ${channel} templates.`);
+            return;
+          }          
+
+          await communicationService.createTemplate(data);
+
+          toast.success(
+          selectedTemplate
+            ? 'Template updated successfully'
+            : 'Template created successfully'
+          );
+
+          await loadTemplates();
+        }}
+      />     
     </div>
   );
 }

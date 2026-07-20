@@ -295,13 +295,7 @@ export const adminService = {
 
     if (fetchError) throw fetchError;
 
-    // ---- Single API call to the delete-user Edge Function -------------------
-    // The Edge Function (supabase/functions/delete-user) handles EVERYTHING
-    // server-side using the service role key:
-    //   1. Deletes the auth.users row (auth.admin.deleteUser)
-    //   2. Nullifies FK references in no-cascade tables
-    //   3. Hard-deletes the public.users row (frees the email constraint)
-    //
+ 
     // The browser NEVER touches the service role key. No manual Supabase
     // dashboard deletion is required.
     const { data: sessionData } = await supabase.auth.getSession();
@@ -399,11 +393,7 @@ export const adminService = {
     const page = params?.page || 1;
     const limit = params?.limit || 20;
 
-    // Raw `audit_logs` columns (companyId, userId, action, entityType,
-    // entityId, oldValues, newValues, ipAddress, userAgent, createdAt) don't
-    // match what the AuditLogsPage UI expects (userName, userRole, module,
-    // entityName, description, timestamp, changes) — join `users` for the
-    // denormalized name/role, and map the rest below in transformAuditLog().
+    
     let query = supabase
       .from('audit_logs')
       .select('*, users!userId(name, role)', { count: 'exact' })
@@ -412,11 +402,7 @@ export const adminService = {
 
     if (params?.search) {
       const searchTerm = params.search;
-      // entityId/ipAddress are the only free-text columns actually on this
-      // table; searching by user name would require filtering on the
-      // joined `users` relation, which PostgREST .or() can't combine with
-      // top-level columns in one call — left out rather than referencing
-      // nonexistent columns.
+     
       query = query.or(`entityType.ilike.%${searchTerm}%,entityId.ilike.%${searchTerm}%,ipAddress.ilike.%${searchTerm}%`);
     }
 

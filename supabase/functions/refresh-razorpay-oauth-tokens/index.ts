@@ -1,32 +1,3 @@
-// Supabase Edge Function: refresh-razorpay-oauth-tokens
-//
-// Phase C (Razorpay OAuth). Intended to run once a day via pg_cron + pg_net
-// (see the cron.schedule() snippet in
-// supabase/migrations/20260712180000_razorpay_oauth_refresh_cron_docs.sql),
-// mirroring the exact same scheduling pattern as check-overdue-invoices.
-//
-// Logic: find every gateway_settings row on the OAuth connection path whose
-// access token expires within the next 24 hours, and refresh it via
-// Razorpay's token endpoint (https://auth.razorpay.com/token,
-// grant_type=refresh_token). Razorpay issues a NEW refresh_token on every
-// refresh and invalidates the old one, so both tokens are re-stored, not
-// just the access token. If the refresh itself fails (refresh token expired
-// — Razorpay's docs say these are valid 180 days from issuance — or
-// revoked), the company's razorpayEnabled flag is flipped off and a
-// communication_logs row is written so it's visible from the app that they
-// need to reconnect; their OAuth tokens are left in place (not cleared) so
-// support/debugging can see what was last on file, mirroring how the
-// manual-credentials path never silently deletes a saved secret either.
-//
-// Auth: invoked by pg_cron/a scheduler, not a logged-in user — requires the
-// same shared-secret-header pattern as check-overdue-invoices
-// (`x-cron-secret` matching this function's own CRON_SECRET environment
-// secret). Deploy with `--no-verify-jwt` and `supabase secrets set
-// CRON_SECRET=...` (can reuse the same value as check-overdue-invoices's
-// CRON_SECRET or set a distinct one for this function — both are read via
-// `Deno.env.get('CRON_SECRET')` scoped to their own function's secrets, so
-// either choice works).
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const RAZORPAY_OAUTH_TOKEN_URL = 'https://auth.razorpay.com/token';

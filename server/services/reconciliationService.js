@@ -1,6 +1,7 @@
 // Shared payment reconciliation logic.
 
 import { getSupabaseAdmin } from './supabaseAdmin.js';
+import { sendInvoiceEmail } from './emailService.js';
 
 // Maps a gateway's own method vocabulary onto our narrower PaymentMethod
 // Postgres enum (CARD | UPI | NETBANKING | WALLET | CASH | CHEQUE).
@@ -32,6 +33,154 @@ function mapPaytmMethod(paymentMode) {
 
 export const methodMappers = { razorpay: mapRazorpayMethod, paytm: mapPaytmMethod };
 
+
+async function generateInvoiceNumberForCompany(supabase, companyId) {
+  const { data: settings, error: settingsError } = await supabase
+    .from('invoice_settings')
+    .select('*')
+    .eq('companyId', companyId)
+    .maybeSingle();
+
+  if (settingsError) throw settingsError;
+
+  if (settings) {
+    const nextNumber = settings.nextNumber || 1001;
+    const prefix = settings.prefix || 'INV';
+
+    const { error: updateSettingsError } = await supabase
+      .from('invoice_settings')
+      .update({ nextNumber: nextNumber + 1 })
+      .eq('companyId', companyId);
+    if (updateSettingsError) throw updateSettingsError;
+
+    return `${prefix}-${String(nextNumber).padStart(6, '0')}`;
+  }
+
+  const { count } = await supabase
+    .from('invoices')
+    .select('*', { count: 'exact', head: true })
+    .eq('companyId', companyId);
+
+  return `INV-${String((count || 0) + 1001).padStart(6, '0')}`;
+}
+
+
+async function createInvoiceForPaymentLink(supabase, link) {
+  const number = await generateInvoiceNumberForCompany(supabase, link.companyId);
+  const now = new Date().toISOString();
+
+  const { data: invoice, error: invoiceError } = await supabase
+    .from('invoices')
+    .insert({
+      companyId: link.companyId,
+      customerId: link.customerId,
+      number,
+      status: 'DRAFT', // flipped to PAID by the normal reconciliation flow just below
+      issueDate: now,
+      dueDate: now,
+      subtotal: link.amount,
+      taxAmount: 0,
+      discountAmount: 0,
+      total: link.amount,
+      amountPaid: 0,
+      balance: link.amount,
+      notes: link.description || null,
+      createdById: link.createdById || null,
+      updatedById: link.createdById || null,
+    })
+    .select()
+    .single();
+  if (invoiceError) throw invoiceError;
+
+  const { error: itemError } = await supabase.from('invoice_items').insert({
+    invoiceId: invoice.id,
+    description: link.title || link.description || 'Payment',
+    quantity: 1,
+    rate: link.amount,
+    discount: 0,
+    taxRate: 0,
+    amount: link.amount,
+    sortOrder: 0,
+  });
+  if (itemError) throw itemError;
+
+  await supabase.from('invoice_activities').insert({
+    invoiceId: invoice.id,
+    userId: null,
+    action: 'created',
+    description: `Invoice auto-created from payment link "${link.title || link.slug}"`,
+  });
+
+  // Attach the invoice to the link so the UI/future lookups reflect it too,
+  // not just this one payment's reconciliation.
+  const { error: linkAttachError } = await supabase
+    .from('payment_links')
+    .update({ invoiceId: invoice.id, updatedAt: now })
+    .eq('id', link.id);
+  if (linkAttachError) {
+    console.error('[createInvoiceForPaymentLink] failed to attach invoiceId to payment link:', linkAttachError.message);
+  }
+
+  console.log(`[createInvoiceForPaymentLink] created invoice #${number} (${invoice.id}) for payment link ${link.id}`);
+  return invoice;
+}
+
+// Best-effort email delivery of a paid invoice — never throws, so a
+// notification failure can't undo the payment/invoice records already
+// committed in reconcilePayment above. Every branch logs explicitly (no
+// silent returns) so a missing email is always explainable from the server
+// terminal instead of just... not happening with no trace.
+async function notifyInvoicePaid(supabase, invoice) {
+  try {
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('name, email, whatsapp, mobile')
+      .eq('id', invoice.customerId)
+      .maybeSingle();
+
+    if (customerError) {
+      console.error('[notifyInvoicePaid] customer lookup failed:', customerError.message);
+      return;
+    }
+    if (!customer) {
+      console.error(`[notifyInvoicePaid] no customer found for customerId ${invoice.customerId} — cannot notify`);
+      return;
+    }
+    if (!customer.email) {
+      console.error(`[notifyInvoicePaid] customer ${invoice.customerId} (${customer.name}) has no email on file — skipping invoice email`);
+      return;
+    }
+
+    const { data: items, error: itemsError } = await supabase
+      .from('invoice_items')
+      .select('*')
+      .eq('invoiceId', invoice.id);
+
+    if (itemsError) {
+      console.error('[notifyInvoicePaid] failed to load invoice_items:', itemsError.message);
+    }
+
+    const invoicePayload = {
+      id: invoice.id,
+      number: invoice.number,
+      lineItems: items || [],
+      subtotal: invoice.subtotal,
+      taxAmount: invoice.taxAmount,
+      total: invoice.total,
+      dueDate: invoice.dueDate,
+    };
+
+    try {
+      await sendInvoiceEmail({ to: customer.email, customerName: customer.name, invoice: invoicePayload });
+      console.log(`[notifyInvoicePaid] invoice #${invoice.number} emailed to ${customer.email}`);
+    } catch (emailError) {
+      console.error('[notifyInvoicePaid] invoice email failed:', emailError.message);
+    }
+  } catch (notifyError) {
+    console.error('[notifyInvoicePaid] unexpected failure:', notifyError.message);
+  }
+}
+
 /**
  * @param {object} input
  * @param {'RAZORPAY'|'PAYTM'} input.gateway
@@ -51,10 +200,14 @@ export async function reconcilePayment(input) {
     transactionId,
     amount,
     method,
-    invoiceId = null,
+    invoiceId: inputInvoiceId = null,
     paymentLinkId = null,
     rawPayload = null,
   } = input;
+
+  // Mutable — gets set to the auto-created invoice's id below if a
+  // standalone payment link (no invoice attached) is what got paid.
+  let invoiceId = inputInvoiceId;
 
   if (!transactionId) {
     return { status: 'skipped', reason: 'missing transactionId' };
@@ -114,7 +267,9 @@ export async function reconcilePayment(input) {
 
   if (outcome === 'failed') {
     // Record the failed attempt for the audit trail, but don't touch
-    // invoice/payment_link/customer state — nothing succeeded.
+    // invoice/payment_link/customer state — nothing succeeded. (No
+    // invoice auto-creation here either — no reason to generate an
+    // invoice for a payment that never went through.)
     const { data: failedPayment, error: insertError } = await supabase
       .from('payments')
       .insert({
@@ -165,7 +320,24 @@ export async function reconcilePayment(input) {
     return { status: 'recorded-failure', paymentId: failedPayment.id };
   }
 
-  // ---- outcome === 'captured': record the payment, then cascade updates. ----
+  // ---- outcome === 'captured' ----
+
+  // A standalone payment link (never attached to an invoice) just got paid.
+  // Auto-create an invoice for it now, before recording the payment, so the
+  // rest of this function (amountPaid/balance/status updates, customer
+  // stats, notifications, and the invoice email below) all run exactly as
+  // they would for a normal invoice payment — no separate code path needed.
+  if (resolvedLink && !resolvedInvoice) {
+    try {
+      const newInvoice = await createInvoiceForPaymentLink(supabase, resolvedLink);
+      resolvedInvoice = newInvoice;
+      invoiceId = newInvoice.id;
+    } catch (autoInvoiceError) {
+      console.error('[reconcilePayment] auto invoice creation for payment link failed:', autoInvoiceError.message);
+    }
+  }
+
+  // ---- record the payment, then cascade updates. ----
   const { data: payment, error: paymentInsertError } = await supabase
     .from('payments')
     .insert({
@@ -213,26 +385,9 @@ export async function reconcilePayment(input) {
     });
 
     if (isPaid) {
-      // totalInvoices is incremented exactly once, at invoice creation time
-      // (see invoiceService.create in the frontend). It must NOT be bumped
-      // again here on payment reconciliation, or every paid invoice would
-      // be double-counted in the customer's invoice count.
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
-        .select('totalRevenue, outstandingAmount')
-        .eq('id', resolvedInvoice.customerId)
-        .maybeSingle();
-      if (customerError) throw customerError;
-      if (customer) {
-        const { error: customerUpdateError } = await supabase
-          .from('customers')
-          .update({
-            totalRevenue: parseFloat(customer.totalRevenue || 0) + parseFloat(resolvedInvoice.total),
-            outstandingAmount: Math.max(0, parseFloat(customer.outstandingAmount || 0) - amount),
-          })
-          .eq('id', resolvedInvoice.customerId);
-        if (customerUpdateError) throw customerUpdateError;
-      }
+      // customers.totalInvoices / totalRevenue / outstandingAmount are kept
+      // in sync automatically by the `invoices_sync_customer_stats` DB
+      // trigger (see migration 20260716120000_customer_invoice_stats_sync.sql)
     }
   }
 
@@ -287,6 +442,13 @@ export async function reconcilePayment(input) {
     }
   } catch (notifyError) {
     console.error('[reconcilePayment] failed to write payment notification:', notifyError.message);
+  }
+
+  // Once an invoice is fully paid, email it to the customer automatically —
+  // this now fires for standalone payment links too, since one gets
+  // auto-created for them above before this point.
+  if (resolvedInvoice && isPaid) {
+    await notifyInvoicePaid(supabase, resolvedInvoice);
   }
 
   await supabase.from('activity_logs').insert({

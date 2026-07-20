@@ -471,12 +471,7 @@ export const settingsService = {
     }
   },
 
-  // Phase B/E (Razorpay OAuth): resolves the URL the "Connect with Razorpay"
-  // button should navigate the browser to. This is a full top-level
-  // navigation (not a fetch), so — unlike every other authenticated call in
-  // this file — the caller's access token has to travel as a query param
-  // rather than an Authorization header; see the matching comment in
-  // server/routes/razorpayOauthRoutes.js for the trade-off this implies.
+  
   async getRazorpayOauthAuthorizeUrl(): Promise<string> {
     const {
       data: { session },
@@ -492,9 +487,7 @@ export const settingsService = {
     return url.toString();
   },
 
-  // Phase E: "Disconnect" for a company on the OAuth connection path — best
-  // effort revokes the token with Razorpay, then always clears our own
-  // stored copy server-side.
+ 
   async disconnectRazorpayOauth(): Promise<void> {
     const {
       data: { session },

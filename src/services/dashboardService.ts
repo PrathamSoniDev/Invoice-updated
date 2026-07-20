@@ -331,14 +331,14 @@ export const dashboardService = {
     // This is a placeholder for any cache invalidation or recalculation logic
   },
 
-  async getChartData(type: string): Promise<{ data: any[] }> {
+  async getChartData(type: string, months: number): Promise<{ data: any[] }> {
     switch (type) {
       case 'revenue-trend':
-        return { data: await this.getRevenueTrend() };
+        return { data: await this.getRevenueTrend(months) };
       case 'invoice-trend':
-        return { data: await this.getInvoiceTrend() };
+        return { data: await this.getInvoiceTrend(months) };
       case 'customer-growth':
-        return { data: await this.getCustomerGrowth() };
+        return { data: await this.getCustomerGrowth(months) };
       case 'payment-distribution':
         return { data: await this.getPaymentDistribution() };
       default:

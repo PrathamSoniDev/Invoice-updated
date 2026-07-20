@@ -109,10 +109,7 @@ async function fetchInvoiceItems(invoiceId: string): Promise<InvoiceItemRow[]> {
   return (data || []) as InvoiceItemRow[];
 }
 
-// Phase 5: GST auto-split. Looks up the company's registered state and the
-// target customer's billing state to decide whether line-item tax should
-// be split CGST+SGST (intra-state) or charged in full as IGST
-// (inter-state). See src/utils/gst.ts for the actual split math.
+
 async function resolveIsIntraState(companyId: string, customerId: string): Promise<boolean> {
   const [{ data: company, error: companyError }, { data: customer, error: customerError }] = await Promise.all([
     supabase.from('companies').select('state').eq('id', companyId).maybeSingle(),
@@ -165,6 +162,7 @@ export const invoiceService = {
     status?: string;
     page?: number;
     limit?: number;
+    customerId?: string;
   }): Promise<{ data: Invoice[]; total: number; page: number; limit: number; totalPages: number }> {
     const companyId = await getCurrentCompanyId();
     const page = params?.page || 1;
@@ -176,6 +174,10 @@ export const invoiceService = {
       .eq('companyId', companyId)
       .is('deletedAt', null)
       .order('createdAt', { ascending: false });
+
+    if (params?.customerId) {
+      query = query.eq('customerId', params.customerId);
+    }
 
     if (params?.search) {
       const searchTerm = params.search.trim();

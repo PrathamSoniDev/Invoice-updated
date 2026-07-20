@@ -1,16 +1,3 @@
-// Signed, stateless "state" parameter for the Razorpay OAuth authorize/
-// callback round trip (Phase B). Encodes the caller's companyId + a CSRF
-// nonce + an expiry, HMAC-signed with RAZORPAY_OAUTH_STATE_SECRET so the
-// callback can trust the companyId it carries without needing a server-side
-// session store — the signature is what prevents a third party from forging
-// or tampering with a state value, and the expiry bounds how long a leaked/
-// intercepted state value would remain usable.
-//
-// This mirrors, in spirit, the "sign a short-lived claim, verify it
-// stateless-ly on the way back" shape already used elsewhere in this app
-// (Supabase JWTs), just scoped to this one OAuth handshake instead of a full
-// session.
-
 import crypto from 'crypto';
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes — plenty for a redirect round trip, short enough to bound risk.

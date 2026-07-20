@@ -3,14 +3,6 @@ import { formatCurrency, formatDate } from '@/utils';
 import { summarizeGst } from '@/utils/gst';
 import { toast } from 'sonner';
 
-// Real invoice PDF generation (Phase 2). This follows the same
-// window.open + window.print() approach already used by
-// src/utils/reportExport.ts (exportPDF/buildPDFHTML), but with its own
-// dedicated template — an actual tax-invoice layout (logo/GSTIN header,
-// bill-to block, line items table, tax summary, terms/notes) rather than
-// the generic tabular report template, since the two documents look
-// nothing alike.
-
 function escapeHTML(value: unknown): string {
   return String(value ?? '')
     .replace(/&/g, '&amp;')

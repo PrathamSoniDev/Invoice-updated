@@ -2,7 +2,7 @@
 
 
 import { createClient } from '@supabase/supabase-js';
-import WebSocket from 'ws';
+import WebSocket from 'websocket';
 
 // See the matching comment in supabaseAdmin.js — avoids a "native WebSocket not found" crash on Node <22.
 const REALTIME_OPTIONS = { transport: WebSocket };

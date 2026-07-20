@@ -100,6 +100,8 @@ export function PaymentLinkDetailsPage() {
           expiryDate: link.expiryDate,
           description: link.description,
         },
+        paymentLinkId: link.id,
+        customerId: link.customerId,
       });
       toast.success(`Payment link emailed to ${link.customerEmail}`);
     } catch (error) {

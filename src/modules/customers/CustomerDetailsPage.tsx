@@ -28,10 +28,10 @@ export function CustomerDetailsPage() {
     setLoading(true);
     Promise.all([
       customerService.get(id!),
-      invoiceService.list({ search: '', limit: 100 }),
+      invoiceService.list({ customerId: id, limit: 100 }),
     ]).then(([c, invRes]) => {
       setCustomer(c);
-      setCustomerInvoices(invRes.data.filter((inv: Invoice) => inv.customerId === id));
+      setCustomerInvoices(invRes.data);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [id]);

@@ -36,7 +36,7 @@ interface CustomerRow {
   deletedAt: string | null;
 }
 
-// Phase 4: CSV import. One parsed+mapped CSV row, ready for bulkImport().
+// CSV import. One parsed+mapped CSV row, ready for bulkImport().
 // All fields are strings (raw from CSV / the mapping UI) — bulkImport()
 // does its own trimming/validation.
 export interface CustomerImportRow {
@@ -415,7 +415,7 @@ export const customerService = {
     }));
   },
 
-  // Phase 4: bulk CSV import with duplicate detection. Duplicates are
+  // CSV import with duplicate detection. Duplicates are
   // matched on email OR gstNumber against existing customers in the same
   // company (case-insensitive email match, exact gstNumber match — blank
   // gstNumbers never match each other). `duplicateStrategy` controls what

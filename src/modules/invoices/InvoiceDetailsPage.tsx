@@ -16,7 +16,7 @@ import type { Invoice, GatewayType, Customer } from '@/types';
 import { formatCurrency, formatDate, getInitials } from '@/utils';
 import { printInvoicePDF } from '@/utils/invoicePdf';
 import { summarizeGst } from '@/utils/gst';
-import { FileText, Edit, Download, Printer, Copy, Mail, MessageCircle } from 'lucide-react';
+import { FileText, Edit, Download, Printer, Copy, Mail, MessageCircle, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
 import axios from "axios";
 
@@ -107,6 +107,7 @@ export function InvoiceDetailsPage() {
         customerEmail: invoice.customerEmail,
         customerName: invoice.customerName,
         invoice: {
+          id: invoice.id,
           number: invoice.number,
           lineItems: invoice.lineItems.map((item) => ({
             description: item.description,
@@ -119,6 +120,7 @@ export function InvoiceDetailsPage() {
           total: invoice.total,
           dueDate: invoice.dueDate,
         },
+        customerId: invoice.customerId,
       });
       // Email confirmed — mark as SENT in the database.
       const updated = await invoiceService.send(invoice.id);
@@ -134,6 +136,25 @@ export function InvoiceDetailsPage() {
     } finally {
       setSendingEmail(false);
     }
+  };
+
+  
+  const handleSendWhatsapp = () => {
+    if (!invoice) return;
+    const rawPhone = customer?.whatsapp || customer?.mobile;
+    if (!rawPhone) {
+      toast.error('This customer has no WhatsApp number on file');
+      return;
+    }
+    // wa.me expects digits only (with country code) — no +, spaces, or dashes.
+    const digitsOnly = rawPhone.replace(/\D/g, '');
+    if (!digitsOnly) {
+      toast.error('This customer\'s WhatsApp number looks invalid');
+      return;
+    }
+    const message = `Hi ${invoice.customerName}, here's your invoice #${invoice.number} for ${formatCurrency(invoice.total)}, due ${formatDate(invoice.dueDate)}. Thank you!`;
+    const waUrl = `https://wa.me/${digitsOnly}?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank');
   };
 
   const handlePayRazorpay = async () => {
@@ -268,8 +289,18 @@ export function InvoiceDetailsPage() {
             </Button>
           )}
           {whatsappEnabled && (
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.success('Invoice sent via WhatsApp')}>
+            <Button variant="outline" size="sm" className="gap-2" onClick={handleSendWhatsapp}>
               <MessageCircle className="h-4 w-4" /> WhatsApp
+            </Button>
+          )}
+          {invoice.status !== 'paid' && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => navigate(`/payment-links/new?invoiceId=${invoice.id}&customerId=${invoice.customerId}`)}
+            >
+              <Link2 className="h-4 w-4" /> Create Payment Link
             </Button>
           )}
            {invoice.status !== "paid" && paymentGatewayConnected && (

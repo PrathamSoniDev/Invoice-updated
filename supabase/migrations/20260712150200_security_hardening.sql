@@ -1,30 +1,4 @@
--- Phase 9: security hardening.
 
--- ============================================================================
--- 1. Audit log immutability
--- ============================================================================
--- The spec asks to replace a "FOR ALL ... USING (true) WITH CHECK (true)"
--- policy on audit_logs with separate INSERT-only policies. That FOR ALL
--- policy was already dropped in 20260702051510_update_rls_policies.sql,
--- which left audit_logs with only SELECT and INSERT policies (both scoped to
--- "companyId" = get_company_id()) — verified via:
---   SELECT polname, polcmd FROM pg_policies WHERE tablename = 'audit_logs';
--- There is no UPDATE or DELETE policy at all for `anon`/`authenticated`, and
--- with RLS enabled, the absence of a matching policy means those commands
--- are already denied by default. So audit_logs is already immutable for
--- everyone except service_role (which bypasses RLS entirely, as intended —
--- only backend jobs/Edge Functions use that key). Same story for
--- activity_logs. Nothing to change there.
---
--- What IS actually broken: the master account's cross-tenant audit/activity
--- writes (see masterService.ts's logMasterAudit/logMasterActivity, added
--- alongside the Master Console CRUD work) insert rows with the TARGET
--- company's id, not the master account's own company — but the existing
--- INSERT policies require "companyId" = get_company_id() (the CALLER's own
--- company), so those inserts have been silently failing RLS for the master
--- account this whole time (caught by a try/catch and logged to console,
--- never surfaced). Fixing that is squarely "audit log" work, so it's
--- included here rather than filed separately.
 DROP POLICY IF EXISTS "audit_logs_insert_super_admin" ON audit_logs;
 CREATE POLICY "audit_logs_insert_super_admin" ON audit_logs FOR INSERT
   TO authenticated
@@ -45,9 +19,7 @@ CREATE POLICY "activity_logs_select_super_admin" ON activity_logs FOR SELECT
   TO authenticated
   USING (public.is_super_admin());
 
--- ============================================================================
--- 2. Login rate limiting
--- ============================================================================
+
 -- Backs the check-login-attempts Edge Function, called from authStore.ts
 -- BEFORE signInWithPassword. Keyed by IP+email since either alone is too
 -- coarse (shared office IP vs. a targeted single-account brute force).

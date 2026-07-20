@@ -89,6 +89,8 @@ export function PaymentLinkCreatePage() {
           expiryDate: createdLink.expiryDate,
           description: createdLink.description,
         },
+        paymentLinkId: createdLink.id,
+        customerId: createdLink.customerId,
       });
       toast.success(`Payment link emailed to ${createdLink.customerEmail}`);
     } catch (error) {

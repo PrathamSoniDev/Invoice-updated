@@ -7,7 +7,7 @@
 // The service-role key bypasses Row Level Security entirely.
 
 import { createClient } from '@supabase/supabase-js';
-import WebSocket from 'ws';
+import WebSocket from 'websocket';
 
 // supabase-js always spins up a realtime client internally, even though
 // nothing on this server uses realtime subscriptions — on Node versions

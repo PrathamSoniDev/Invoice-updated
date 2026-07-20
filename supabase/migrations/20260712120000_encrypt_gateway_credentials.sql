@@ -1,27 +1,4 @@
--- Phase 1: Encrypt gateway credentials at rest.
---
--- Previously `razorpayKeySecret` and `paytmMerchantKey` were stored as plain
--- text in `gateway_settings` and were readable/writable directly by the
--- frontend via PostgREST (RLS policy "gateway_crud" allows anon/authenticated
--- full access to the row). This migration:
---
---   1. Adds new `bytea` columns to hold `pgp_sym_encrypt()` ciphertext.
---   2. Adds two SECURITY DEFINER helper functions, callable only by
---      `service_role`, that encrypt/decrypt using a passphrase supplied at
---      call time (never stored in the database) — the two new
---      `save-gateway-credentials` / `get-gateway-status` Edge Functions pass
---      this passphrase in from their own environment secrets.
---   3. Drops the old plaintext columns.
---   4. Revokes column-level access to the new encrypted columns from
---      anon/authenticated as defense in depth, on top of routing all reads/
---      writes through the Edge Functions.
---
--- NOTE: because the encryption passphrase lives only in Edge Function
--- environment secrets (never in SQL), this migration cannot re-encrypt any
--- pre-existing plaintext secrets — that data is dropped with the plaintext
--- columns. Once `save-gateway-credentials` is deployed with
--- GATEWAY_CREDENTIALS_ENCRYPTION_KEY set, reconnect Razorpay/Paytm once from
--- the Settings page to repopulate the encrypted columns.
+
 
 ALTER TABLE gateway_settings
   ADD COLUMN IF NOT EXISTS "razorpayKeySecretEnc" bytea,
@@ -31,10 +8,7 @@ ALTER TABLE gateway_settings
   DROP COLUMN IF EXISTS "razorpayKeySecret",
   DROP COLUMN IF EXISTS "paytmMerchantKey";
 
--- ---------------------------------------------------------------------------
--- set_gateway_secret: encrypts p_secret with p_key and stores it in the
--- correct *Enc column for the given company + gateway. Returns nothing.
--- ---------------------------------------------------------------------------
+
 CREATE OR REPLACE FUNCTION set_gateway_secret(
   p_company_id uuid,
   p_gateway text,
@@ -66,12 +40,7 @@ BEGIN
 END;
 $$;
 
--- ---------------------------------------------------------------------------
--- get_gateway_secret_preview: decrypts the stored ciphertext internally but
--- only ever RETURNS a masked preview (last 4 chars). The full plaintext
--- never leaves this function, and this function is only reachable by
--- service_role (i.e. from within an Edge Function), never PostgREST clients.
--- ---------------------------------------------------------------------------
+
 CREATE OR REPLACE FUNCTION get_gateway_secret_preview(
   p_company_id uuid,
   p_gateway text,

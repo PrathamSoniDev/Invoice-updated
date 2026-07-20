@@ -1,34 +1,3 @@
-// Supabase Edge Function: get-gateway-status
-//
-// Phase 1 (encrypt gateway credentials at rest). Returns the current
-// company's gateway configuration WITHOUT ever exposing a decrypted secret:
-// `keySecretPreview` / `merchantKeyPreview` are masked (e.g. "••••••••3f9a"),
-// produced entirely inside the `get_gateway_secret_preview` SQL function —
-// the full plaintext secret never leaves the database, let alone this
-// function or the frontend.
-//
-// Request: POST with an empty body (or GET) + Authorization: Bearer <jwt>
-//
-// Response (JSON): 200
-//   {
-//     razorpay: { enabled, keyId, webhookSecret, upiId, keySecretPreview,
-//                 connectionMethod: 'manual' | 'oauth',
-//                 oauth: null | { accountId, connected, expiresAt, reconnectNeeded } },
-//     paytm:    { enabled, merchantId, environment, upiId, merchantKeyPreview },
-//   }
-// (webhookSecret is intentionally still returned in full for now — it's used
-// to display/copy the webhook URL config, not treated as the primary
-// merchant secret. It can be masked the same way as the key secrets later
-// if desired.)
-//
-// Phase E (Razorpay OAuth): `razorpay.oauth` is null when connectionMethod
-// is 'manual' (nothing to report). When connectionMethod is 'oauth', it
-// never includes a token value — only enough for the Settings page to show
-// a "reconnect needed" banner: `reconnectNeeded` is true if the stored
-// access token has already expired (the daily refresh cron in Phase C
-// failed to renew it, e.g. because the refresh token itself was revoked/
-// expired) or is missing entirely.
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {

@@ -96,8 +96,7 @@ export async function refreshAccessToken(refreshToken) {
 }
 
 /**
- * Revokes a token (used on manual "Disconnect" from the Settings page —
- * Phase E). Best-effort: if this fails (e.g. token already invalid), the
+ * Best-effort: if this fails (e.g. token already invalid), the
  * caller should still clear the locally-stored tokens.
  * @param {string} token
  * @param {'access_token' | 'refresh_token'} tokenTypeHint

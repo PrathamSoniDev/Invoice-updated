@@ -52,6 +52,8 @@ interface PaymentLinkWithCustomer extends PaymentLinkRow {
     name: string;
     email: string;
     businessName: string;
+    mobile: string;
+    whatsapp: string | null;
   };
   invoices?: {
     id: string;
@@ -60,7 +62,7 @@ interface PaymentLinkWithCustomer extends PaymentLinkRow {
 }
 
 const PAYMENT_LINK_SELECT =
-  '*, customers!payment_links_customerId_fkey(id, name, email, businessName), invoices!payment_links_invoiceId_fkey(id, number)';
+  '*, customers!payment_links_customerId_fkey(id, name, email, businessName, mobile, whatsapp), invoices!payment_links_invoiceId_fkey(id, number)';
 
 interface PaymentWithCustomer extends PaymentRow {
   customers: {
@@ -237,6 +239,7 @@ export const paymentService = {
     gateway: string;
     description?: string;
     expiryDays?: number;
+    invoiceId?: string;
   }): Promise<PaymentLink> {
     const companyId = await getCurrentCompanyId();
     const userId = await getCurrentUserId();
@@ -262,6 +265,7 @@ export const paymentService = {
       .insert({
         companyId,
         customerId: input.customerId,
+        invoiceId: input.invoiceId || null,
         slug,
         title: `Payment for ${input.amount}`,
         description: input.description || null,
@@ -279,68 +283,72 @@ export const paymentService = {
 
     await logActivity('create', 'payment_link', data.id, `Created payment link for ${input.amount}`);
 
-    // Auto-generate a matching invoice so the payment link immediately shows
-    // up in the Invoice tab, and the customer's invoice count updates too
-    // (invoiceService.create() now increments customers.totalInvoices).
-    // A failure here shouldn't block the payment link itself from being
-    // created, so we log and continue rather than throwing.
+    // Only auto-generate a matching invoice when the user didn't already
+    // attach an existing one (input.invoiceId) — linking an invoice is
+    // optional; when skipped, the link still needs its own invoice so it
+    // shows up in the Invoice tab. A failure here shouldn't block the
+    // payment link itself from being created, so we log and continue.
     let resultLink: PaymentLink;
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const dueDate = (input.expiryDays
-        ? new Date(Date.now() + input.expiryDays * 24 * 60 * 60 * 1000)
-        : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-      ).toISOString().slice(0, 10);
-
-      const invoice = await invoiceService.create({
-        customerId: input.customerId,
-        issueDate: today,
-        dueDate,
-        items: [
-          {
-            description: input.description || `Payment link ${slug}`,
-            quantity: 1,
-            rate: input.amount,
-            taxRate: 0,
-          },
-        ],
-        notes: `Auto-generated from payment link ${slug}.`,
-      });
-
-      const { error: linkUpdateError } = await supabase
-        .from('payment_links')
-        .update({ invoiceId: invoice.id })
-        .eq('companyId', companyId)
-        .eq('id', data.id);
-
-      if (linkUpdateError) throw linkUpdateError;
-
-      const { data: refreshed, error: refreshedError } = await supabase
-        .from('payment_links')
-        .select(PAYMENT_LINK_SELECT)
-        .eq('companyId', companyId)
-        .eq('id', data.id)
-        .single();
-
-      if (refreshedError) throw refreshedError;
-
-      resultLink = transformPaymentLink(refreshed as PaymentLinkWithCustomer);
-    } catch (invoiceGenerationError) {
-      console.error('Failed to auto-generate invoice for payment link:', invoiceGenerationError);
+    if (input.invoiceId) {
       resultLink = transformPaymentLink(data as PaymentLinkWithCustomer);
+    } else {
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const dueDate = (input.expiryDays
+          ? new Date(Date.now() + input.expiryDays * 24 * 60 * 60 * 1000)
+          : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        ).toISOString().slice(0, 10);
+
+        const invoice = await invoiceService.create({
+          customerId: input.customerId,
+          issueDate: today,
+          dueDate,
+          items: [
+            {
+              description: input.description || `Payment link ${slug}`,
+              quantity: 1,
+              rate: input.amount,
+              taxRate: 0,
+            },
+          ],
+          notes: `Auto-generated from payment link ${slug}.`,
+        });
+
+        const { error: linkUpdateError } = await supabase
+          .from('payment_links')
+          .update({ invoiceId: invoice.id })
+          .eq('companyId', companyId)
+          .eq('id', data.id);
+
+        if (linkUpdateError) throw linkUpdateError;
+
+        const { data: refreshed, error: refreshedError } = await supabase
+          .from('payment_links')
+          .select(PAYMENT_LINK_SELECT)
+          .eq('companyId', companyId)
+          .eq('id', data.id)
+          .single();
+
+        if (refreshedError) throw refreshedError;
+
+        resultLink = transformPaymentLink(refreshed as PaymentLinkWithCustomer);
+      } catch (invoiceGenerationError) {
+        console.error('Failed to auto-generate invoice for payment link:', invoiceGenerationError);
+        resultLink = transformPaymentLink(data as PaymentLinkWithCustomer);
+      }
     }
 
     // Automatically email the payment link to the customer right away,
-    // rather than requiring a manual "Email Link" click after creation.
-    // Best-effort: a failed/misconfigured email send shouldn't block the
-    // payment link itself from being created — the "Email Link" button on
-    // the details/create pages remains available to retry or resend.
+    // rather than requiring a manual click after creation. Best-effort: a
+    // failed/misconfigured send shouldn't block the payment link itself
+    // from being created — the "Email" button on the details page remains
+    // available to resend.
+    const absoluteUrl = resultLink.url.startsWith('http')
+      ? resultLink.url
+      : `${(typeof window !== 'undefined' && window.location?.origin) || ''}${resultLink.url}`;
+
     if (resultLink.customerEmail) {
       try {
-        const absoluteUrl = resultLink.url.startsWith('http')
-          ? resultLink.url
-          : `${(typeof window !== 'undefined' && window.location?.origin) || ''}${resultLink.url}`;
-
         await sendPaymentLinkEmail({
           customerEmail: resultLink.customerEmail,
           customerName: resultLink.customerName,
@@ -352,6 +360,8 @@ export const paymentService = {
             expiryDate: resultLink.expiryDate,
             description: resultLink.description,
           },
+          paymentLinkId: resultLink.id,
+          customerId: resultLink.customerId,
         });
       } catch (emailSendError) {
         console.error('Failed to auto-send payment link email:', emailSendError);
@@ -405,7 +415,39 @@ export const paymentService = {
 
     await logActivity('update', 'payment_link', id, 'Updated payment link');
 
-    return transformPaymentLink(data as PaymentLinkWithCustomer);
+    const updatedLink = transformPaymentLink(data as PaymentLinkWithCustomer);
+
+    // Whenever the amount changes, the customer's copy of the link is now
+    // stale (wrong amount due), so re-send it automatically by email rather
+    // than relying on someone to remember to hit "Email" again. Best-effort:
+    // a failed/misconfigured send shouldn't block the edit itself — the
+    // "Email" button on the details page remains available to retry.
+    const amountChanged = input.amount !== undefined && parseFloat(existing.amount) !== input.amount;
+    if (amountChanged && updatedLink.customerEmail) {
+      const absoluteUrl = updatedLink.url.startsWith('http')
+        ? updatedLink.url
+        : `${(typeof window !== 'undefined' && window.location?.origin) || ''}${updatedLink.url}`;
+      try {
+        await sendPaymentLinkEmail({
+          customerEmail: updatedLink.customerEmail,
+          customerName: updatedLink.customerName,
+          paymentLink: {
+            linkId: updatedLink.linkId,
+            amount: updatedLink.amount,
+            currency: updatedLink.currency,
+            url: absoluteUrl,
+            expiryDate: updatedLink.expiryDate,
+            description: updatedLink.description,
+          },
+          paymentLinkId: updatedLink.id,
+          customerId: updatedLink.customerId,
+        });
+      } catch (emailSendError) {
+        console.error('Failed to auto-send updated payment link email:', emailSendError);
+      }
+    }
+
+    return updatedLink;
   },
 
   async updateLinkStatus(id: string, status: 'paid' | 'expired' | 'failed' | 'pending'): Promise<PaymentLink> {

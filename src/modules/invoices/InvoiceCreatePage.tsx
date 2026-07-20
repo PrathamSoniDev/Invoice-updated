@@ -206,6 +206,7 @@ export function InvoiceCreatePage() {
             customerEmail: selectedCustomer.email,
             customerName: selectedCustomer.name,
             invoice: {
+              id: savedInvoice.id,
               number: savedInvoice.number,
               lineItems: savedInvoice.lineItems.map((item) => ({
                 description: item.description,
@@ -218,6 +219,7 @@ export function InvoiceCreatePage() {
               total: savedInvoice.total,
               dueDate: savedInvoice.dueDate,
             },
+            customerId: savedInvoice.customerId,
           });
           // Email confirmed — now mark the invoice as SENT in the database.
           await invoiceService.send(savedInvoice.id);
