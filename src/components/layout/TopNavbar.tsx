@@ -117,7 +117,7 @@ export function TopNavbar() {
     navigate(result.path);
     setQuery('');
     setResults([]);
-    setOpen(false);
+    setOpen(false); 
   }
 
   return (
