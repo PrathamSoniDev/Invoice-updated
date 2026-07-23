@@ -700,7 +700,7 @@ export async function sendPaymentLinkEmail({ to, customerName, paymentLink }) {
   });
 
   const { subject, html } = templateResult;
-
+  
   const { data, error } = await resend.emails.send({
     from: FROM_ADDRESS,
     to,
