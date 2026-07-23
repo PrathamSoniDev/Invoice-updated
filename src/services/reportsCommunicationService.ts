@@ -441,7 +441,7 @@ export const communicationService = {
           body: input.body,
           variables: input.variables,
           isDefault: false,
-          isActive: existing.length === 0,
+          isActive: false,
       })      
       .select()
       .single();
@@ -528,6 +528,26 @@ export const communicationService = {
       .eq("id", templateId);
 
     if (activeError) throw activeError;
+  },
+
+  /**
+   * Selects the single built-in default template for a channel — the
+   * dynamic, always-available template that automatically uses the
+   * company's own name and logo. There's no database row for it; "default
+   * is active" is represented by none of the company's custom templates
+   * being active, which is exactly what the backend email/communication
+   * senders fall back to when they don't find an active custom template.
+   */
+  async activateDefaultTemplate(channel: MessageTemplate['channel']): Promise<void> {
+    const companyId = await getCurrentCompanyId();
+
+    const { error } = await supabase
+      .from("message_templates")
+      .update({ isActive: false })
+      .eq("companyId", companyId)
+      .eq("channel", channel.toUpperCase());
+
+    if (error) throw error;
   },
 
   async updateTemplate(
