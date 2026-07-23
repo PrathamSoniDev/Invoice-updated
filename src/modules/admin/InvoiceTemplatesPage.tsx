@@ -262,7 +262,7 @@ export function InvoiceTemplatesPage() {
               label: 'Status',
               value: statusFilter,
               options: [
-                { label: 'All Statuses', value: 'all' },
+                { label: 'All Status', value: 'all' },
                 { label: 'Active', value: 'active' },
                 { label: 'Disabled', value: 'disabled' },
                 { label: 'Draft', value: 'draft' },

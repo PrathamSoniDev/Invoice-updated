@@ -9,8 +9,8 @@ interface FileUploadProps {
   description?: string;
   accept?: string;
   preview?: string;
-  onUpload: (dataUrl: string) => void;
-  onRemove?: () => void;
+  onUpload: (dataUrl: string) => void | Promise<void>;
+  onRemove?: () => void | Promise<void>;
   className?: string;
   aspectRatio?: 'square' | 'wide' | 'natural';
 }
@@ -27,6 +27,7 @@ export function FileUpload({
 }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const handleFile = useCallback((file: File) => {
     if (!file.type.match(/image\/(png|jpeg|jpg|svg\+xml)/)) {
@@ -38,12 +39,38 @@ export function FileUpload({
       return;
     }
     const reader = new FileReader();
-    reader.onload = (e) => {
-      onUpload(e.target?.result as string);
-      toast.success(`${label} uploaded successfully`);
+    reader.onload = async (e) => {
+      const dataUrl = e.target?.result as string;
+      setIsSaving(true);
+      try {
+        // Await it: onUpload actually persists the change (e.g. to the
+        // company profile in the database) — only report success once that
+        // has genuinely happened, not just once the file's been read into
+        // memory. A rejected promise here (network error, permission
+        // error, etc.) now surfaces as a real error instead of a
+        // misleading "uploaded successfully" toast.
+        await onUpload(dataUrl);
+        toast.success(`${label} uploaded successfully`);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : `Failed to save ${label.toLowerCase()}`);
+      } finally {
+        setIsSaving(false);
+      }
     };
     reader.readAsDataURL(file);
   }, [label, onUpload]);
+
+  const handleRemove = useCallback(async () => {
+    if (!onRemove) return;
+    setIsSaving(true);
+    try {
+      await onRemove();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `Failed to remove ${label.toLowerCase()}`);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [onRemove, label]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -74,11 +101,11 @@ export function FileUpload({
             <img src={preview} alt={label} className="max-w-full max-h-full object-contain p-2" />
           </div>
           <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-            <Button size="sm" variant="secondary" onClick={() => inputRef.current?.click()}>
+            <Button size="sm" variant="secondary" onClick={() => inputRef.current?.click()} disabled={isSaving}>
               <Upload className="h-3.5 w-3.5 mr-1.5" /> Replace
             </Button>
             {onRemove && (
-              <Button size="sm" variant="destructive" onClick={onRemove}>
+              <Button size="sm" variant="destructive" onClick={handleRemove} disabled={isSaving}>
                 <X className="h-3.5 w-3.5 mr-1.5" /> Remove
               </Button>
             )}

@@ -28,13 +28,21 @@ export function InvoiceListPage() {
 
   useEffect(() => {
     setLoading(true);
-    invoiceService.list({ search, status: statusFilter, page, limit }).then((res) => {
-      setInvoices(res.data);
-      useSearchIndexStore.getState().setInvoices(res.data);
-      setTotal(res.total);
-      setTotalPages(res.totalPages);
-      setLoading(false);
-    });
+    invoiceService.list({ search, status: statusFilter, page, limit })
+      .then((res) => {
+        setInvoices(res.data);
+        useSearchIndexStore.getState().setInvoices(res.data);
+        setTotal(res.total);
+        setTotalPages(res.totalPages);
+      })
+      .catch((error) => {
+        console.error('[InvoiceListPage] Failed to load invoices:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to load invoices');
+        setInvoices([]);
+        setTotal(0);
+        setTotalPages(1);
+      })
+      .finally(() => setLoading(false));
   }, [search, statusFilter, page]);
 
   const columns: Column<Invoice>[] = [

@@ -1,24 +1,3 @@
-// Supabase Edge Function: get-gateway-status
-//
-// Phase 1 (encrypt gateway credentials at rest). Returns the current
-// company's gateway configuration WITHOUT ever exposing a decrypted secret:
-// `keySecretPreview` / `merchantKeyPreview` are masked (e.g. "••••••••3f9a"),
-// produced entirely inside the `get_gateway_secret_preview` SQL function —
-// the full plaintext secret never leaves the database, let alone this
-// function or the frontend.
-//
-// Request: POST with an empty body (or GET) + Authorization: Bearer <jwt>
-//
-// Response (JSON): 200
-//   {
-//     razorpay: { enabled, keyId, webhookSecret, upiId, keySecretPreview },
-//     paytm:    { enabled, merchantId, environment, upiId, merchantKeyPreview },
-//   }
-// (webhookSecret is intentionally still returned in full for now — it's used
-// to display/copy the webhook URL config, not treated as the primary
-// merchant secret. It can be masked the same way as the key secrets later
-// if desired.)
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
@@ -99,7 +78,7 @@ Deno.serve(async (req: Request) => {
   const { data: settings, error: settingsError } = await adminClient
     .from('gateway_settings')
     .select(
-      'razorpayEnabled, razorpayKeyId, razorpayWebhook, razorpayUpiId, paytmEnabled, paytmMerchantId, paytmEnvironment, paytmUpiId',
+      'razorpayEnabled, razorpayKeyId, razorpayWebhook, razorpayUpiId, razorpayConnectionMethod, razorpayOauthAccountId, razorpayOauthAccessTokenExpiresAt, paytmEnabled, paytmMerchantId, paytmEnvironment, paytmUpiId',
     )
     .eq('companyId', companyId)
     .maybeSingle();
@@ -130,6 +109,9 @@ Deno.serve(async (req: Request) => {
     console.error('[get-gateway-status] paytm preview failed:', paytmPreviewResult.error.message);
   }
 
+  const connectionMethod = (settings?.razorpayConnectionMethod ?? 'manual') as 'manual' | 'oauth';
+  const oauthExpiresAt = settings?.razorpayOauthAccessTokenExpiresAt ?? null;
+
   return json(
     {
       razorpay: {
@@ -138,6 +120,16 @@ Deno.serve(async (req: Request) => {
         webhookSecret: settings?.razorpayWebhook ?? '',
         upiId: settings?.razorpayUpiId ?? '',
         keySecretPreview: razorpayPreviewResult.data ?? null,
+        connectionMethod,
+        oauth:
+          connectionMethod === 'oauth'
+            ? {
+                accountId: settings?.razorpayOauthAccountId ?? null,
+                connected: Boolean(settings?.razorpayEnabled),
+                expiresAt: oauthExpiresAt,
+                reconnectNeeded: !oauthExpiresAt || new Date(oauthExpiresAt).getTime() <= Date.now(),
+              }
+            : null,
       },
       paytm: {
         enabled: settings?.paytmEnabled ?? false,

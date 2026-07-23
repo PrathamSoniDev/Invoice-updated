@@ -39,7 +39,15 @@ const defaultCommunication: CommunicationSettings = {
 };
 
 const defaultGateways: GatewaySettings = {
-  razorpay: { status: 'disconnected', keyId: '', keySecretPreview: null, webhookSecret: '', upiId: '' },
+  razorpay: {
+    status: 'disconnected',
+    keyId: '',
+    keySecretPreview: null,
+    webhookSecret: '',
+    upiId: '',
+    connectionMethod: 'manual',
+    oauth: null,
+  },
   paytm: { status: 'disconnected', merchantId: '', merchantKeyPreview: null, environment: 'TEST', upiId: '' },
 };
 
@@ -58,6 +66,7 @@ interface SettingsState {
   updateInvoice: (data: Partial<InvoiceSettings>) => Promise<void>;
   updateCommunication: (data: Partial<CommunicationSettings>) => Promise<void>;
   updateGateways: (data: GatewayCredentialsUpdate) => Promise<void>;
+  refreshGateways: () => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -134,5 +143,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   updateGateways: async (data: GatewayCredentialsUpdate) => {
     const gateways = await settingsApi.updateGatewaySettings(data);
     set({ gateways });
+  },
+
+  // Used after returning from the Razorpay OAuth redirect (and after
+  // "Disconnect") to pick up the freshly-changed connectionMethod/oauth
+  // status without refetching every other settings section.
+  refreshGateways: async () => {
+    const gateways = await settingsApi.getGatewaySettings();
+    if (gateways) set({ gateways });
   },
 }));

@@ -1,25 +1,6 @@
-// Supabase Edge Function: send-scheduled-reports
-//
 // Intended to run on a timer via pg_cron + pg_net (see the cron.schedule()
 // snippet at the bottom of
-// supabase/migrations/20260712150000_scheduled_reports.sql) or, if pg_cron
-// isn't available on your plan, via Supabase's dashboard "Scheduled
-// Functions" feature — same approach as check-overdue-invoices.
-//
-// Every run: finds scheduled_reports rows that are due (isActive = true and
-// nextSendAt <= now()), regenerates that report's data fresh from the
-// database, emails it as a CSV attachment via Resend, and advances
-// nextSendAt by the schedule's frequency.
-//
-// Auth: invoked by pg_cron/a scheduler, not a logged-in user — same shared
-// x-cron-secret header pattern as check-overdue-invoices. Deploy with
-// `--no-verify-jwt` and set CRON_SECRET via `supabase secrets set`.
-//
-// Report content: a straightforward CSV table export per reportType,
-// deliberately simpler than the interactive charts/breakdowns on the
-// Reports page — this runs unattended in the background, so it sticks to
-// data a spreadsheet can render rather than trying to reproduce the full
-// dashboard.
+
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 

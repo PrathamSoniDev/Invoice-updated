@@ -12,6 +12,7 @@ import { AuthProvider } from '@/components/auth/AuthProvider';
 const LoginPage = lazy(() => import('@/modules/auth/LoginPage').then((m) => ({ default: m.LoginPage })));
 const ForgotPasswordPage = lazy(() => import('@/modules/auth/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import('@/modules/auth/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })));
+const PublicPaymentPage = lazy(() => import('@/modules/payments/PublicPaymentPage').then((m) => ({ default: m.PublicPaymentPage })));
 const DashboardPage = lazy(() => import('@/modules/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })));
 const CustomerListPage = lazy(() => import('@/modules/customers/CustomerListPage').then((m) => ({ default: m.CustomerListPage })));
 const CustomerDetailsPage = lazy(() => import('@/modules/customers/CustomerDetailsPage').then((m) => ({ default: m.CustomerDetailsPage })));
@@ -58,6 +59,7 @@ export default function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
+              <Route path="/pay/:slug" element={<PublicPaymentPage />} />
             </Route>
 
             {/* Protected routes */}

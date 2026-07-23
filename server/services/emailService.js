@@ -412,7 +412,7 @@ export async function sendInviteEmail({ to, name, companyName, loginUrl }) {
     .eq("email", to)
     .single();
 
-  const companyId = userDb.companyId;
+  const companyId = userDb?.companyId;
 
   const templateVariables = {
     customer_name: name,
@@ -420,7 +420,49 @@ export async function sendInviteEmail({ to, name, companyName, loginUrl }) {
     login_link: loginUrl
   }; 
 
-  const {subject, html} = await buildEmailFromTemplate(companyId, templateVariables)
+  
+  let subject;
+  let html;
+  try {
+    ({ subject, html } = await buildEmailFromTemplate(companyId, templateVariables));
+  } catch (templateError) {
+    console.log('[emailService] No active invite template for company, using built-in invite template:', templateError.message);
+    subject = `You've been invited to InvoiceGen`;
+    html = `
+      <!DOCTYPE html>
+      <html>
+        <body style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#f8fafc; padding:32px 0; margin:0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+                  <tr>
+                    <td style="background:linear-gradient(135deg,#7c3aed,#a855f7); height:6px;"></td>
+                  </tr>
+                  <tr>
+                    <td style="padding:32px;">
+                      <h1 style="margin:0 0 16px; font-size:20px; color:#111827;">You've been invited to InvoiceGen</h1>
+                      <p style="margin:0 0 8px; font-size:14px; color:#374151;">Hi ${name || 'there'},</p>
+                      <p style="margin:0 0 20px; font-size:14px; color:#374151; line-height:1.6;">
+                        You've been added as a user${companyName ? ` for <strong>${companyName}</strong>` : ''} on InvoiceGen.
+                        Click below to log in. If this is your first time signing in, use "Forgot password" on the login page to set your own password.
+                      </p>
+                      <a href="${loginUrl}" style="display:inline-block; background:#7c3aed; color:#ffffff; text-decoration:none; padding:12px 24px; border-radius:8px; font-size:14px; font-weight:600;">
+                        Log in to InvoiceGen
+                      </a>
+                      <p style="margin:24px 0 0; font-size:12px; color:#9ca3af;">
+                        If you weren't expecting this invite, you can safely ignore this email.
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+  }
    
   const { data, error } = await resend.emails.send({
     from: FROM_ADDRESS,
@@ -439,4 +481,123 @@ export async function sendInviteEmail({ to, name, companyName, loginUrl }) {
   return { id: data?.id };
 }
 
-export default { sendInvoiceEmail, sendInviteEmail };
+/**
+ * Build the HTML email body for a payment link.
+ *
+ * @param {string} customerName
+ * @param {object} paymentLink  { linkId, amount, currency, url, expiryDate, description }
+ * @returns {string}
+ */
+function buildPaymentLinkHtml(customerName, paymentLink) {
+  const description = escapeHtml(paymentLink.description || 'Payment request');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payment Request</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f8;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#4f46e5;padding:24px 32px;">
+              <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;">InvoiceGen</h1>
+              <p style="margin:4px 0 0;color:#e0e7ff;font-size:13px;">Payment Request</p>
+            </td>
+          </tr>
+
+          <!-- Greeting -->
+          <tr>
+            <td style="padding:28px 32px 8px;">
+              <p style="margin:0;font-size:16px;">Hi <strong>${escapeHtml(customerName)}</strong>,</p>
+              <p style="margin:8px 0 0;font-size:14px;color:#4b5563;">You have a pending payment request${description ? `: ${description}` : ''}.</p>
+            </td>
+          </tr>
+
+          <!-- Amount -->
+          <tr>
+            <td style="padding:16px 32px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f9fafb;border-radius:8px;">
+                <tr>
+                  <td style="padding:20px 24px;text-align:center;">
+                    <p style="margin:0;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em;">Amount Due</p>
+                    <p style="margin:6px 0 0;font-size:28px;font-weight:700;color:#4f46e5;">${formatCurrency(paymentLink.amount)}</p>
+                    ${paymentLink.expiryDate ? `<p style="margin:8px 0 0;font-size:12px;color:#9ca3af;">Valid until ${escapeHtml(formatDate(paymentLink.expiryDate))}</p>` : ''}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA -->
+          <tr>
+            <td style="padding:8px 32px 28px;text-align:center;">
+              <a href="${paymentLink.url}" style="display:inline-block;background-color:#4f46e5;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:600;">
+                Pay Now
+              </a>
+              <p style="margin:16px 0 0;font-size:12px;color:#9ca3af;word-break:break-all;">${escapeHtml(paymentLink.url)}</p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:20px 32px;background-color:#f9fafb;border-top:1px solid #eef0f3;">
+              <p style="margin:0;font-size:14px;color:#4b5563;">Thank you for your business</p>
+              <p style="margin:6px 0 0;font-size:12px;color:#9ca3af;">This is an automated email from InvoiceGen.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+/**
+ * Send a payment link email to a customer via Resend.
+ *
+ * @param {object} params
+ * @param {string} params.to            Recipient email address.
+ * @param {string} params.customerName  Customer's display name for the greeting.
+ * @param {object} params.paymentLink   { linkId, amount, currency, url, expiryDate, description }
+ * @returns {Promise<{ id: string }>}   Resend message id on success.
+ * @throws {Error} If Resend returns an error or the API key is missing.
+ */
+export async function sendPaymentLinkEmail({ to, customerName, paymentLink }) {
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error('RESEND_API_KEY is not configured on the server.');
+  }
+  if (!to || typeof to !== 'string') {
+    throw new Error('A valid recipient email address ("to") is required.');
+  }
+  if (!paymentLink || !paymentLink.url) {
+    throw new Error('A valid paymentLink object with a "url" is required.');
+  }
+
+  const html = buildPaymentLinkHtml(customerName, paymentLink);
+
+  const { data, error } = await resend.emails.send({
+    from: FROM_ADDRESS,
+    to,
+    subject: `Payment Request — ${formatCurrency(paymentLink.amount)}`,
+    html,
+  });
+
+  if (error) {
+    console.error('[emailService] Payment link send failed:', error.message);
+    throw new Error(`Failed to send email: ${error.message}`);
+  }
+
+  console.log(`[emailService] Payment link ${paymentLink.linkId} sent to ${to} (id: ${data?.id})`);
+  return { id: data?.id };
+}
+
+export default { sendInvoiceEmail, sendInviteEmail, sendPaymentLinkEmail };

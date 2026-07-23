@@ -214,7 +214,7 @@ export function UsageAnalyticsPage() {
           {recentActivity.slice(0, 10).map((log) => (
             <div key={log.id} className="flex items-center gap-3 rounded-lg border p-2.5">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-semibold">
-                {log.userName.split(' ').map((n) => n[0]).slice(0, 2).join('')}
+                {(log.userName || 'System').split(' ').map((n) => n[0]).slice(0, 2).join('')}
               </div>
               <div className="flex-1">
                 <p className="text-sm font-medium">{log.description}</p>

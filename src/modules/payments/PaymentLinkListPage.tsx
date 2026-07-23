@@ -27,13 +27,21 @@ export function PaymentLinkListPage() {
 
   useEffect(() => {
     setLoading(true);
-    paymentService.listLinks({ search, status: statusFilter, page, limit }).then((res) => {
-      setLinks(res.data);
-      useSearchIndexStore.getState().setPaymentLinks(res.data);
-      setTotal(res.total);
-      setTotalPages(res.totalPages);
-      setLoading(false);
-    });
+    paymentService.listLinks({ search, status: statusFilter, page, limit })
+      .then((res) => {
+        setLinks(res.data);
+        useSearchIndexStore.getState().setPaymentLinks(res.data);
+        setTotal(res.total);
+        setTotalPages(res.totalPages);
+      })
+      .catch((error) => {
+        console.error('[PaymentLinkListPage] Failed to load payment links:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to load payment links');
+        setLinks([]);
+        setTotal(0);
+        setTotalPages(1);
+      })
+      .finally(() => setLoading(false));
   }, [search, statusFilter, page]);
 
   const columns: Column<PaymentLink>[] = [

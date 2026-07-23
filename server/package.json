@@ -16,6 +16,7 @@
     "express": "^4.21.2",
     "paytmchecksum": "^1.5.0",
     "razorpay": "^2.9.6",
-    "resend": "^6.17.1"
+    "resend": "^6.17.1",
+    "ws": "^8.18.0"
   }
 }

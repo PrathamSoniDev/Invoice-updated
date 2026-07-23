@@ -215,6 +215,33 @@ export function MasterConsolePage() {
       resetUserForm();
       toast.success('User created successfully');
       loadAll();
+
+      // Fire the invite email after creation succeeds. 
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+        const inviteResponse = await fetch(`${apiUrl}/users/send-invite`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: uEmail, name: uName, companyName: created.companyName || uNewCompanyName }),
+        });
+        let inviteResult: { message?: string } = {};
+        try {
+          inviteResult = await inviteResponse.json();
+        } catch {
+          // Non-JSON response (e.g. the backend isn't running and a dev
+          // server / proxy returned an HTML error page instead).
+        }
+        if (!inviteResponse.ok) {
+          throw new Error(inviteResult.message || `Failed to send invite email (HTTP ${inviteResponse.status})`);
+        }
+      } catch (inviteError) {
+        console.error('[MasterConsolePage] invite email failed:', inviteError);
+        toast.error(
+          inviteError instanceof Error
+            ? `User created, but invite email failed: ${inviteError.message}`
+            : 'User created, but the invite email failed to send.'
+        );
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to create user');
     }

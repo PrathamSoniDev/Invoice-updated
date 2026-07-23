@@ -1,8 +1,4 @@
--- Phase 8: subscription/billing management. Adds plan/usage tracking to
--- companies and a `plans` reference table, seeded with Free/Pro/Business
--- tiers. Actually charging the customer for the subscription itself is out
--- of scope (per the spec) — this is just the data model + admin controls,
--- surfaced in the Master Console (Super Admin only).
+
 
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS "subscriptionPlan" text NOT NULL DEFAULT 'free';
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS "subscriptionStatus" text NOT NULL DEFAULT 'active';
@@ -63,16 +59,7 @@ CREATE POLICY "plans_write_super_admin" ON plans FOR ALL
   USING (public.is_super_admin())
   WITH CHECK (public.is_super_admin());
 
--- The existing `update_own_company` policy (see
--- 20260702051510_update_rls_policies.sql) lets any company ADMIN update
--- their own `companies` row — which would otherwise let a tenant admin set
--- their own subscriptionPlan/usageQuota directly, bypassing billing
--- entirely. RLS policies can't restrict individual columns, so this trigger
--- closes that gap by silently reverting the billing columns to their
--- previous values whenever a non-super-admin (i.e. anyone other than the
--- master account, or the service_role used by backend jobs) tries to change
--- them. Other columns on the same UPDATE (name, logo, address, etc.) are
--- unaffected.
+
 CREATE OR REPLACE FUNCTION public.protect_billing_columns()
 RETURNS trigger
 LANGUAGE plpgsql
