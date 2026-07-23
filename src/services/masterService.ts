@@ -831,18 +831,7 @@ export const masterService = {
     };
   },
 
-  /**
-   * Update status/dates/notes on an invoice belonging to any tenant company.
-   *
-   * NOTE: as of the Phase 1 payment webhook work (see server/services/
-   * reconciliationService.js), invoice status normally flips to PAID
-   * automatically once Razorpay/Paytm confirms a payment — via
-   * POST /api/webhooks/razorpay, POST /api/webhooks/paytm, or the
-   * checksum/signature-verified redirect flows (/api/payment/verify,
-   * /api/paytm/callback). This method is now the *manual override* path
-   * (e.g. an offline/bank-transfer payment, or correcting a stuck invoice)
-   * rather than the only way an invoice becomes PAID.
-   */
+
   async updateInvoice(id: string, input: Partial<{
     status: InvoiceStatus;
     issueDate: string;

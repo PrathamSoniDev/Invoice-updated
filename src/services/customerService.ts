@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from '@/lib/supabase';
-import { getCurrentCompanyId, getCurrentUserId, paginate, logActivity, logAudit } from '@/lib/database';
+import { getCurrentCompanyId, getCurrentUserId, paginate, logActivity, logAudit, sanitizeSearchTerm } from '@/lib/database';
 import type { Customer } from '@/types';
 
 interface CustomerRow {
@@ -36,7 +36,7 @@ interface CustomerRow {
   deletedAt: string | null;
 }
 
-// Phase 4: CSV import. One parsed+mapped CSV row, ready for bulkImport().
+// CSV import. One parsed+mapped CSV row, ready for bulkImport().
 // All fields are strings (raw from CSV / the mapping UI) — bulkImport()
 // does its own trimming/validation.
 export interface CustomerImportRow {
@@ -196,8 +196,24 @@ export const customerService = {
       .order('createdAt', { ascending: false });
 
     if (params?.search) {
-      const searchTerm = params.search;
-      query = query.or(`name.ilike.%${searchTerm}%,businessName.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,mobile.ilike.%${searchTerm}%`);
+      const searchTerm = sanitizeSearchTerm(params.search);
+      if (searchTerm) {
+        query = query.or(
+          [
+            `name.ilike.%${searchTerm}%`,
+            `businessName.ilike.%${searchTerm}%`,
+            `email.ilike.%${searchTerm}%`,
+            `mobile.ilike.%${searchTerm}%`,
+            `whatsapp.ilike.%${searchTerm}%`,
+            `gstNumber.ilike.%${searchTerm}%`,
+            `billingLine1.ilike.%${searchTerm}%`,
+            `billingCity.ilike.%${searchTerm}%`,
+            `billingState.ilike.%${searchTerm}%`,
+            `billingPincode.ilike.%${searchTerm}%`,
+            `notes.ilike.%${searchTerm}%`,
+          ].join(','),
+        );
+      }
     }
 
     if (params?.status && params.status !== 'all') {
@@ -399,7 +415,7 @@ export const customerService = {
     }));
   },
 
-  // Phase 4: bulk CSV import with duplicate detection. Duplicates are
+  // CSV import with duplicate detection. Duplicates are
   // matched on email OR gstNumber against existing customers in the same
   // company (case-insensitive email match, exact gstNumber match — blank
   // gstNumbers never match each other). `duplicateStrategy` controls what

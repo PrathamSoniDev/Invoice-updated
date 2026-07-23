@@ -109,10 +109,7 @@ async function fetchInvoiceItems(invoiceId: string): Promise<InvoiceItemRow[]> {
   return (data || []) as InvoiceItemRow[];
 }
 
-// Phase 5: GST auto-split. Looks up the company's registered state and the
-// target customer's billing state to decide whether line-item tax should
-// be split CGST+SGST (intra-state) or charged in full as IGST
-// (inter-state). See src/utils/gst.ts for the actual split math.
+
 async function resolveIsIntraState(companyId: string, customerId: string): Promise<boolean> {
   const [{ data: company, error: companyError }, { data: customer, error: customerError }] = await Promise.all([
     supabase.from('companies').select('state').eq('id', companyId).maybeSingle(),
@@ -165,6 +162,7 @@ export const invoiceService = {
     status?: string;
     page?: number;
     limit?: number;
+    customerId?: string;
   }): Promise<{ data: Invoice[]; total: number; page: number; limit: number; totalPages: number }> {
     const companyId = await getCurrentCompanyId();
     const page = params?.page || 1;
@@ -177,9 +175,53 @@ export const invoiceService = {
       .is('deletedAt', null)
       .order('createdAt', { ascending: false });
 
+    if (params?.customerId) {
+      query = query.eq('customerId', params.customerId);
+    }
+
     if (params?.search) {
-     	const searchTerm = params.search;
-      query = query.or(`number.ilike.%${searchTerm}%`);
+      const searchTerm = params.search.trim();
+      if (searchTerm) {
+        const orParts = [
+          `number.ilike.%${searchTerm}%`,
+          `notes.ilike.%${searchTerm}%`,
+          `terms.ilike.%${searchTerm}%`,
+        ];
+
+        // Numeric fields (amounts) only support exact matches - ILIKE isn't
+        // valid on decimal columns.
+        const numericTerm = Number(searchTerm);
+        if (searchTerm !== '' && !Number.isNaN(numericTerm)) {
+          orParts.push(`total.eq.${numericTerm}`);
+          orParts.push(`subtotal.eq.${numericTerm}`);
+          orParts.push(`balance.eq.${numericTerm}`);
+        }
+
+        // Status is an enum column, so match it exactly (case-insensitively)
+        // rather than with ILIKE, which Postgres doesn't support on enums.
+        const statusValues = ['DRAFT', 'SENT', 'VIEWED', 'PAID', 'OVERDUE', 'CANCELLED'];
+        const statusMatch = statusValues.find((s) => s === searchTerm.toUpperCase());
+        if (statusMatch) {
+          orParts.push(`status.eq.${statusMatch}`);
+        }
+
+        // Also match on the linked customer's details (name, business name,
+        // email, mobile, GST number) so searching "Bhuvan" or a GSTIN finds
+        // the right invoices even though those fields live on another table.
+        const { data: matchingCustomers } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('companyId', companyId)
+          .or(
+            `name.ilike.%${searchTerm}%,businessName.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,mobile.ilike.%${searchTerm}%,gstNumber.ilike.%${searchTerm}%`
+          );
+        const customerIds = (matchingCustomers || []).map((c) => c.id);
+        if (customerIds.length > 0) {
+          orParts.push(`customerId.in.(${customerIds.join(',')})`);
+        }
+
+        query = query.or(orParts.join(','));
+      }
     }
 
     if (params?.status && params.status !== 'all') {
@@ -647,26 +689,11 @@ export const invoiceService = {
 
     if (activityError) throw activityError;
 
-    // Update customer stats only for the invoice's company-scoped customer.
-    const { data: customer, error: customerError } = await supabase
-      .from('customers')
-      .select('totalInvoices, totalRevenue')
-      .eq('companyId', companyId)
-      .eq('id', invoice.customerId)
-      .single();
-
-    if (customerError) throw customerError;
-
-    const { error: customerUpdateError } = await supabase
-      .from('customers')
-      .update({
-        totalInvoices: (customer.totalInvoices || 0) + 1,
-        totalRevenue: parseFloat(customer.totalRevenue || 0) + parseFloat(invoice.total),
-      })
-      .eq('companyId', companyId)
-      .eq('id', invoice.customerId);
-
-    if (customerUpdateError) throw customerUpdateError;
+    // Customer stats (totalInvoices / totalRevenue / outstandingAmount) are kept
+    // in sync automatically by the `invoices_sync_customer_stats` DB trigger
+    // (see migration 20260716120000_customer_invoice_stats_sync.sql), which
+    // recalculates them from the invoices table whenever amountPaid/balance/
+    // status/customerId/deletedAt change. No manual update needed here.
 
     return this.get(id);
   },

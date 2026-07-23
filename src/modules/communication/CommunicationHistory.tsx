@@ -52,20 +52,6 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
     }
   };  
 
-  const handleSetDefault = async (id: string) => {
-    try {
-      await communicationService.setDefaultTemplate(id);
-
-      const updated = await communicationService.listTemplates();
-
-      setTemplates(updated.filter((t) => t.channel === channel));
-
-      toast.success("Default template updated");
-    } catch {
-      toast.error("Failed to update default template");
-    }
-  };
-
   const handleSetActive = async (id: string) => {
     try {
       await communicationService.setActiveTemplate(id);
@@ -77,6 +63,20 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
       toast.success("Active template updated");
     } catch {
       toast.error("Failed to update active template");
+    }
+  };
+
+  const handleActivateDefault = async () => {
+    try {
+      await communicationService.activateDefaultTemplate(channel);
+
+      const updated = await communicationService.listTemplates();
+
+      setTemplates(updated.filter((t) => t.channel === channel));
+
+      toast.success("Default template is now active");
+    } catch {
+      toast.error("Failed to activate the default template");
     }
   };
 
@@ -100,14 +100,9 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
   const handleDeleteTemplate = async (id: string) => {
     try {
       const template: MessageTemplate | undefined = templates.find((t) => t.id === id)
-      
-      if (template?.isDefault) {
-        toast.error("Please select another default template first.");
-        return;
-      }
 
       if (template?.isActive) {
-        toast.error("Please activate another template first.");
+        toast.error("This template is active. Activate the Default template or your other template first.");
         return;
       }
 
@@ -137,6 +132,8 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
   }, [channel]);
 
   const channelTemplates = templates;
+  const isDefaultActive = !channelTemplates.some((t) => t.isActive);
+  const atTemplateLimit = channelTemplates.length >= 2;
 
   const columns: Column<CommunicationLog>[] = [
     {
@@ -188,29 +185,46 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
         <Card className="shadow-soft">
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <CardTitle className="text-base">Message Templates</CardTitle>
-            <Button size="sm" variant="outline" className="gap-2" onClick={() => {
-                  setSelectedTemplate(null);
-                  setDialogOpen(true);
-                }}>
-                <Plus className="h-4 w-4" /> New Template
-              </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              disabled={atTemplateLimit}
+              title={atTemplateLimit ? 'You can create up to 2 templates per channel.' : undefined}
+              onClick={() => {
+                setSelectedTemplate(null);
+                setDialogOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" /> New Template
+            </Button>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {/* The single built-in default template. Always available, not
+                  counted toward the 2-custom-template limit, can't be edited
+                  or deleted — it automatically uses the company's own name
+                  and logo and is used for every mail event when active. */}
+              <div className="rounded-lg border p-4 hover:shadow-soft transition-shadow border-primary/30 bg-primary/5">
+                <div className="flex items-center justify-between mb-3 gap-2">
+                  <Badge variant="outline">System</Badge>
+                  {isDefaultActive ? (
+                    <Badge variant="secondary">Active</Badge>
+                  ) : (
+                    <Button size="sm" variant="secondary" onClick={handleActivateDefault}>
+                      Set Active
+                    </Button>
+                  )}
+                </div>
+                <p className="text-sm font-semibold mb-1">Default Template</p>
+                <p className="text-xs text-muted-foreground mb-2">
+                  The built-in template. Automatically shows your company name and logo — no setup needed.
+                </p>
+              </div>
+
               {channelTemplates.map((tpl) => (
-                <div key={tpl.id} className="rounded-lg border p-4 hover:shadow-soft transition-shadow">   
-                  <div className="flex items-center justify-between mb-3 gap-2">
-                      {tpl.isDefault ? (
-                        <Badge variant="default">Default</Badge>  
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => handleSetDefault(tpl.id)}
-                        >
-                          Set Default
-                        </Button>
-                      )}
+                <div key={tpl.id} className="rounded-lg border p-4 hover:shadow-soft transition-shadow">
+                  <div className="flex items-center justify-end mb-3 gap-2">
                        {tpl.isActive ? (                      
                         <Badge variant="secondary">Active</Badge> 
                       ) : (                        
@@ -252,9 +266,6 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
                   </div>
                 </div>
               ))}
-              {channelTemplates.length === 0 && (
-                <p className="text-sm text-muted-foreground col-span-full text-center py-4">No templates for this channel yet.</p>
-              )}
             </div>
           </CardContent>
         </Card>

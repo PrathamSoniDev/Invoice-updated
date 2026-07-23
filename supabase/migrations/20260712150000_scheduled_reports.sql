@@ -1,8 +1,3 @@
--- Phase 7: scheduled report delivery. Users configure a report + filters to
--- be regenerated and emailed on a recurring cadence; a cron-invoked Edge
--- Function (supabase/functions/send-scheduled-reports) finds rows that are
--- due and sends them — same pg_cron + pg_net + x-cron-secret pattern as
--- check-overdue-invoices (see 20260712140000_add_overdue_reminder_tracking.sql).
 
 CREATE TABLE IF NOT EXISTS scheduled_reports (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),

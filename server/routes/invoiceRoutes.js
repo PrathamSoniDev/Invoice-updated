@@ -1,5 +1,3 @@
-// server/routes/invoiceRoutes.js
-//
 // Express router for invoice-related endpoints.
 // All email sending is delegated to the backend emailService so the
 // Resend API key never leaves the server.
@@ -21,26 +19,7 @@ function isValidEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
-/**
- * POST /api/invoices/send
- *
- * Request body:
- *   {
- *     "customerEmail": "buyer@example.com",
- *     "customerName": "Jane Doe",
- *     "invoice": {
- *       "number": "INV-001",
- *       "lineItems": [{ "description": "...", "quantity": 1, "rate": 100, "amount": 100 }],
- *       "subtotal": 100,
- *       "taxAmount": 18,
- *       "total": 118,
- *       "dueDate": "2026-07-31"
- *     }
- *   }
- *
- * Success response (200):
- *   { "success": true, "message": "Invoice sent successfully" }
- */
+
 router.post('/send', async (req, res) => {
   // ---- Log the incoming request -------------------------------------------
   console.log('[invoiceRoutes] POST /send received:', {

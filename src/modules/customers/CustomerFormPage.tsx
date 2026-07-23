@@ -65,13 +65,23 @@ export function CustomerFormPage() {
       }
     },
     onPaste: (e: ClipboardEvent<HTMLInputElement>) => {
-      const pastedValue = e.clipboardData.getData('text');
-      const selectedLength = e.currentTarget.selectionEnd! - e.currentTarget.selectionStart!;
-      const nextLength = e.currentTarget.value.length - selectedLength + pastedValue.length;
+      // Always sanitize-and-insert rather than reject: phone numbers and
+      // pincodes copied from contacts, WhatsApp, or email frequently carry
+      // spaces, dashes, parentheses, or a country code prefix (e.g.
+      // "+91 98765 43210"). The previous handler rejected the paste
+      // outright whenever it wasn't pure digits, which made copy-paste
+      // look completely broken for real-world formatted numbers.
+      e.preventDefault();
+      const pastedDigits = digitsOnly(e.clipboardData.getData('text'));
+      if (!pastedDigits) return;
 
-      if (!/^\d+$/.test(pastedValue) || nextLength > maxLength) {
-        e.preventDefault();
-      }
+      const input = e.currentTarget;
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? input.value.length;
+      const nextValue = (input.value.slice(0, start) + pastedDigits + input.value.slice(end)).slice(0, maxLength);
+
+      input.value = nextValue;
+      field.onChange({ target: input, currentTarget: input } as ChangeEvent<HTMLInputElement>);
     },
     onChange: (e: ChangeEvent<HTMLInputElement>) => {
       e.currentTarget.value = digitsOnly(e.currentTarget.value).slice(0, maxLength);

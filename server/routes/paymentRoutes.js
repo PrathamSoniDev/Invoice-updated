@@ -17,10 +17,8 @@ router.post("/create-order", async (req, res) => {
     }
 
     // invoiceId/paymentLinkId are attached as Razorpay order notes so the
-    // webhook (and /verify below) can reliably work out which invoice or
-    // payment link this order was for, without trusting anything the client
-    // sends back later — order.notes were set here, server-side, at order
-    // creation time, before any payment happened.
+    // webhook (and /verify below) can reliably work out which invoice 
+   
     const order = await razorpay.orders.create({
       amount: amount * 100,
       currency: "INR",

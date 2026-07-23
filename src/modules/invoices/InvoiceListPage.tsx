@@ -29,13 +29,21 @@ export function InvoiceListPage() {
   const debouncedSearch = useDebounce(search, 500); 
   useEffect(() => {
     setLoading(true);
-    invoiceService.list({ search:debouncedSearch, status: statusFilter, page, limit }).then((res) => {
-      setInvoices(res.data);
-      useSearchIndexStore.getState().setInvoices(res.data);
-      setTotal(res.total);
-      setTotalPages(res.totalPages);
-      setLoading(false);
-    });
+    invoiceService.list({ search:debouncedSearch, status: statusFilter, page, limit })
+      .then((res) => {
+        setInvoices(res.data);
+        useSearchIndexStore.getState().setInvoices(res.data);
+        setTotal(res.total);
+        setTotalPages(res.totalPages);
+      })
+      .catch((error) => {
+        console.error('[InvoiceListPage] Failed to load invoices:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to load invoices');
+        setInvoices([]);
+        setTotal(0);
+        setTotalPages(1);
+      })
+      .finally(() => setLoading(false));
   }, [debouncedSearch, statusFilter, page]);
 
   const columns: Column<Invoice>[] = [

@@ -1,7 +1,7 @@
 {
   "name": "invoicegen-server",
   "version": "1.0.0",
-  "description": "InvoiceGen backend \u2014 Express API for invoice email delivery via Resend",
+  "description": "InvoiceGen backend — Express API for invoice email delivery via Resend",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -16,6 +16,8 @@
     "express": "^4.21.2",
     "paytmchecksum": "^1.5.0",
     "razorpay": "^2.9.6",
-    "resend": "^6.17.1"
+    "resend": "^6.17.1",
+    "sanitize-html": "2.12.1",
+    "ws": "^8.18.0"
   }
 }

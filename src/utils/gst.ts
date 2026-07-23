@@ -1,15 +1,3 @@
-// Phase 5: GST CGST/SGST/IGST auto-split.
-//
-// Shared by src/services/invoiceService.ts, src/services/masterService.ts,
-// src/utils/invoicePdf.ts, and the invoice details page tax summary, so the
-// "same state or not" and "how to split" logic lives in exactly one place.
-
-/**
- * Whether a company (seller) and customer (buyer) are registered in the
- * same state, per standard Indian GST rules — case/whitespace-insensitive
- * comparison since state names are free-text fields in this app rather
- * than a fixed code list.
- */
 export function isIntraStateTransaction(companyState: string | null | undefined, customerState: string | null | undefined): boolean {
   const a = (companyState || '').trim().toLowerCase();
   const b = (customerState || '').trim().toLowerCase();

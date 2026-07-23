@@ -1,36 +1,3 @@
-// Supabase Edge Function: save-gateway-credentials
-//
-// Phase 1 (encrypt gateway credentials at rest). The frontend NEVER reads or
-// writes `gateway_settings.razorpayKeySecretEnc` / `paytmMerchantKeyEnc`
-// directly — it calls this function instead. This function:
-//
-//   1. Authenticates the caller via their JWT.
-//   2. Authorizes: caller must belong to the target company and have role
-//      ADMIN or SUPER_ADMIN (gateway credentials are sensitive; STAFF/
-//      MANAGER/BUSINESS/VIEWER cannot change them).
-//   3. Updates the non-secret fields (keyId/webhookSecret/upiId/merchantId/
-//      environment/enabled flag) directly via the service-role client.
-//   4. If a new plaintext secret was supplied, encrypts it server-side via
-//      the `set_gateway_secret` SQL function using a passphrase from this
-//      function's own environment secrets (GATEWAY_CREDENTIALS_ENCRYPTION_KEY)
-//      — the passphrase and the plaintext secret never touch the database
-//      in cleartext and never go back to the client.
-//
-// Request body (JSON):
-//   {
-//     gateway: 'razorpay' | 'paytm',
-//     enabled?: boolean,
-//     // razorpay fields
-//     keyId?: string, keySecret?: string, webhookSecret?: string, upiId?: string,
-//     // paytm fields
-//     merchantId?: string, merchantKey?: string, environment?: 'TEST' | 'PROD', upiId?: string,
-//   }
-//   `keySecret` / `merchantKey` are OPTIONAL — omit (or send an empty string)
-//   to leave the currently-stored secret untouched, which is what the
-//   Settings page does when the user didn't type a new one.
-//
-// Response (JSON): 200 { success: true } | 4xx/5xx { error: string }
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {

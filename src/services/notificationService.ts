@@ -60,7 +60,7 @@ export const notificationService = {
       .from("notifications")
       .select("*", { count: "exact" })
       .eq("companyId", companyId)
-      .eq("userId", userId)
+      .or(`userId.eq.${userId},userId.is.null`)
       .order("createdAt", { ascending: false });      
 
     if (params?.search) {
@@ -89,13 +89,29 @@ export const notificationService = {
       .from("notifications")
       .select("*")
       .eq("companyId", companyId)
-      .eq("userId", userId)
+      .or(`userId.eq.${userId},userId.is.null`)
       .order("createdAt", { ascending: false })
       .limit(limit);
 
     if (error) throw error;
 
     return (data as NotificationRow[]).map(transformNotification);
+  },
+
+  async getUnreadCount(): Promise<number> {
+    const companyId = await getCurrentCompanyId();
+    const userId = await getCurrentUserId();
+
+    const { count, error } = await supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("companyId", companyId)
+      .or(`userId.eq.${userId},userId.is.null`)
+      .eq("isRead", false);
+
+    if (error) throw error;
+
+    return count ?? 0;
   },
 
   async markAsRead(id: string): Promise<boolean> {
@@ -110,7 +126,7 @@ export const notificationService = {
       })
       .eq("id", id)
       .eq("companyId", companyId)
-      .eq("userId", userId);
+      .or(`userId.eq.${userId},userId.is.null`);
 
     if (error) throw error;
 
@@ -128,7 +144,7 @@ export const notificationService = {
         readAt: new Date().toISOString(),
       })
       .eq("companyId", companyId)
-      .eq("userId", userId)
+      .or(`userId.eq.${userId},userId.is.null`)
       .eq("isRead", false);
 
     if (error) throw error;
