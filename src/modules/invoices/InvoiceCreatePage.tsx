@@ -16,6 +16,7 @@ import { formatCurrency, getInitials, generateId, formatDate } from '@/utils';
 import { FileText, Plus, Trash2, ChevronLeft, ChevronRight, Check, Search, Save, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { communicationService } from '@/services';
 
 const steps = [
   { number: 1, label: 'Select Customer' },
@@ -144,6 +145,7 @@ export function InvoiceCreatePage() {
             customerEmail: selectedCustomer.email,
             customerName: selectedCustomer.name,
             invoice: {
+              id: createdInvoice.id,
               number: createdInvoice.number,
               lineItems: createdInvoice.lineItems.map((item) => ({
                 description: item.description,
@@ -159,6 +161,7 @@ export function InvoiceCreatePage() {
           });
           // Email confirmed — now mark the invoice as SENT in the database.
           await invoiceService.send(createdInvoice.id);
+          communicationService.sendInvoiceEmail(createdInvoice.id, "EMAIL")
           toast.success('Invoice sent successfully');
         } catch (emailError) {
           // Email failed — the invoice remains a DRAFT. Show the real error

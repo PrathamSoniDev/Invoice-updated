@@ -15,6 +15,7 @@ import type { Customer } from '@/types';
 import { formatCurrency, getInitials, downloadCSV } from '@/utils';
 import { Users, Plus, Upload, Mail, Phone } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDebounce } from '@/hooks/use-debounce';
 
 export function CustomerListPage() {
   const navigate = useNavigate();
@@ -28,9 +29,10 @@ export function CustomerListPage() {
   const [importOpen, setImportOpen] = useState(false);
   const limit = 10;
 
+  const debouncedSearch = useDebounce(search, 500); 
   const refresh = () => {
     setLoading(true);
-    customerService.list({ search, status: statusFilter, page, limit }).then((res) => {
+    customerService.list({ search:debouncedSearch, status: statusFilter, page, limit }).then((res) => {
       setCustomers(res.data);
       useSearchIndexStore.getState().setCustomers(res.data);
       setTotal(res.total);
@@ -41,7 +43,7 @@ export function CustomerListPage() {
 
   useEffect(() => {
     refresh();
-  }, [search, statusFilter, page]);
+  }, [debouncedSearch, statusFilter, page]);
 
   const columns: Column<Customer>[] = [
     {

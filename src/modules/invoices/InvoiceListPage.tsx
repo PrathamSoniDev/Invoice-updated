@@ -14,6 +14,7 @@ import type { Invoice } from '@/types';
 import { formatCurrency, formatDate, getInitials, downloadCSV } from '@/utils';
 import { FileText, Plus, Copy, Eye } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDebounce } from '@/hooks/use-debounce';
 
 export function InvoiceListPage() {
   const navigate = useNavigate();
@@ -25,17 +26,17 @@ export function InvoiceListPage() {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const limit = 10;
-
+  const debouncedSearch = useDebounce(search, 500); 
   useEffect(() => {
     setLoading(true);
-    invoiceService.list({ search, status: statusFilter, page, limit }).then((res) => {
+    invoiceService.list({ search:debouncedSearch, status: statusFilter, page, limit }).then((res) => {
       setInvoices(res.data);
       useSearchIndexStore.getState().setInvoices(res.data);
       setTotal(res.total);
       setTotalPages(res.totalPages);
       setLoading(false);
     });
-  }, [search, statusFilter, page]);
+  }, [debouncedSearch, statusFilter, page]);
 
   const columns: Column<Invoice>[] = [
     {

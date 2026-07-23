@@ -417,7 +417,7 @@ export async function sendInviteEmail({ to, name, companyName, loginUrl }) {
   const templateVariables = {
     customer_name: name,
     company_name: companyName || "InvoiceGen",
-    login_link: loginUrl
+    // login_link: loginUrl
   }; 
 
   const {subject, html} = await buildEmailFromTemplate(companyId, templateVariables)

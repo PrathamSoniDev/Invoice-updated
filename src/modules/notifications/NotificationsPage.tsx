@@ -18,6 +18,7 @@ import type { Notification } from "@/types";
 import { formatDate } from "@/utils";
 
 import { toast } from "sonner";
+import { useDebounce } from "@/hooks/use-debounce";
 
 export function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -32,10 +33,10 @@ export function NotificationsPage() {
   const [totalPages, setTotalPages] = useState(1);
 
   const limit = 10;
-
+  const debouncedSearch = useDebounce(search, 500);
   useEffect(() => {
     loadNotifications();
-  }, [page, search, typeFilter]);
+  }, [page, debouncedSearch, typeFilter]);
 
   async function loadNotifications() {
     try {

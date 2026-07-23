@@ -17,6 +17,7 @@ import { auditService } from '@/services';
 import type { AuditLog } from '@/types';
 import { formatDateTime } from '@/utils';
 import { ShieldCheck, Eye } from 'lucide-react';
+import { useDebounce } from '@/hooks/use-debounce';
 
 const actionColors: Record<string, string> = {
   create: 'bg-success/10 text-success',
@@ -38,16 +39,16 @@ export function AuditLogsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
   const limit = 10;
-
+  const debouncedSearch = useDebounce(search, 500);
   useEffect(() => {
     setLoading(true);
-    auditService.list({ search, action: actionFilter, page, limit }).then((res) => {
+    auditService.list({ search:debouncedSearch, action: actionFilter, page, limit }).then((res) => {
       setLogs(res.data);
       setTotal(res.total);
       setTotalPages(res.totalPages);
       setLoading(false);
     });
-  }, [search, actionFilter, page]);
+  }, [debouncedSearch, actionFilter, page]);
 
   const columns: Column<AuditLog>[] = [
     {

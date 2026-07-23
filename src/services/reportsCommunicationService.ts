@@ -388,6 +388,10 @@ export const communicationService = {
       query = query.eq("status", params.status.toUpperCase());
     }
 
+    if(params?.search && params?.search.trim() !== ""){
+      query = query.or(`recipientName.ilike.%${params?.search}%,subject.ilike.%${params?.search}%`)
+    }
+
     const result = await paginate<any>(query, page, limit);
 
     return {
@@ -612,7 +616,7 @@ export const communicationService = {
     if (error) throw error;
   },
 
-  async sendInvoiceEmail(invoiceId: string): Promise<any> {
+  async sendInvoiceEmail(invoiceId: string, channel: string): Promise<any> {
     const companyId = await getCurrentCompanyId();
 
     // Scope invoice lookup by company so email actions cannot target another tenant.
@@ -626,12 +630,26 @@ export const communicationService = {
     if (invoiceError) throw invoiceError;
     if (!invoice) throw new Error("Invoice not found");
 
+    const { data: template, error : templateErr } = await supabase
+      .from("message_templates")
+      .select("*")
+      .eq("companyId", companyId)
+      .eq("channel", channel)
+      .eq("isActive", true)
+      .single();
+
+    if (templateErr) throw templateErr;
+    if (!template) throw new Error(`Template not found for ${channel} logs communication`);
+
     // Log the communication
     const { data: log, error } = await supabase
       .from("communication_logs")
       .insert({
         companyId,
-        channel: "EMAIL",
+        // channel: "EMAIL",
+        channel,
+        templateId : template?.id,
+        templateName: template?.name,
         recipient: (invoice.customers as any)?.email,
         recipientName: (invoice.customers as any)?.name,
         subject: `Invoice ${invoice.number}`,

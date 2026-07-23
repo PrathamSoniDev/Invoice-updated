@@ -9,6 +9,8 @@ import { PaymentGatewayDialog } from '@/components/payments/PaymentGatewayDialog
 import { invoiceService } from '@/services/invoiceService';
 import { customerService } from '@/services/customerService';
 import { sendInvoiceEmail } from '@/services/emailService';
+import { communicationService } from '@/services/reportsCommunicationService';
+import { sendInvoiceWhatsapp } from '@/services/whatsappService';
 import { initiatePaytmCheckout, buildPaytmOrderId } from '@/services/paytmClient';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useModuleStore } from '@/store/moduleStore';
@@ -39,6 +41,7 @@ export function InvoiceDetailsPage() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
   const [gatewayDialogOpen, setGatewayDialogOpen] = useState(false);
   const { company, bank } = useSettingsStore();
   const { isModuleEnabled } = useModuleStore();
@@ -84,6 +87,8 @@ export function InvoiceDetailsPage() {
           dueDate: invoice.dueDate,
         },
       });
+      communicationService.sendInvoiceEmail(invoice.id, "EMAIL")
+
       // Email confirmed — mark as SENT in the database.
       const updated = await invoiceService.send(invoice.id);
       setInvoice(updated);
@@ -97,6 +102,39 @@ export function InvoiceDetailsPage() {
       );
     } finally {
       setSendingEmail(false);
+    }
+  };
+
+  const handleSendWhatsapp = async () => {
+    if (!invoice) return;
+    setSendingWhatsapp(true);
+    try {
+    const url = await sendInvoiceWhatsapp(invoice.id);
+    window.open(url, "_blank");
+    toast.success("Opening WhatsApp...");      
+
+    } catch (error) {
+      console.error('[InvoiceDetailsPage] Whatsapp send failed:', error);
+      toast.error(
+        error instanceof Error
+          ? `Whatsapp not sent: ${error.message}`
+          : 'Failed to send invoice Whatsapp',
+      );
+    } finally {
+      setSendingWhatsapp(false);
+    }
+  }
+
+  const handleCopyLink = async () => {
+    try {
+      if (!invoice) return;
+      const invoiceLink = `${window.location.origin}/invoices/${invoice.id}`;
+
+      await navigator.clipboard.writeText(invoiceLink);
+
+      toast.success("Invoice link copied");
+    } catch (err) {
+      toast.error("Failed to copy link");
     }
   };
 
@@ -215,7 +253,7 @@ export function InvoiceDetailsPage() {
           </span>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.success('Invoice link copied')}>
+          <Button variant="outline" size="sm" className="gap-2" onClick={handleCopyLink}>
             <Copy className="h-4 w-4" /> Copy Link
           </Button>
           {emailEnabled && (
@@ -224,8 +262,8 @@ export function InvoiceDetailsPage() {
             </Button>
           )}
           {whatsappEnabled && (
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.success('Invoice sent via WhatsApp')}>
-              <MessageCircle className="h-4 w-4" /> WhatsApp
+            <Button variant="outline" size="sm" className="gap-2" onClick={handleSendWhatsapp} disabled={sendingWhatsapp}>
+              <MessageCircle className="h-4 w-4" /> {sendingWhatsapp ? "Sending..." : "WhatsApp"}
             </Button>
           )}
            {invoice.status !== "paid" && (

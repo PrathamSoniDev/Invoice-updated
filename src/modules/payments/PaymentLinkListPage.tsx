@@ -13,6 +13,7 @@ import type { PaymentLink } from '@/types';
 import { formatCurrency, formatDate } from '@/utils';
 import { CreditCard, Plus, Copy, Eye } from 'lucide-react';
 import { toast } from 'sonner';
+import { useDebounce } from '@/hooks/use-debounce';
 
 export function PaymentLinkListPage() {
   const navigate = useNavigate();
@@ -24,17 +25,17 @@ export function PaymentLinkListPage() {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const limit = 10;
-
+  const debouncedSearch = useDebounce(search, 500); 
   useEffect(() => {
     setLoading(true);
-    paymentService.listLinks({ search, status: statusFilter, page, limit }).then((res) => {
+    paymentService.listLinks({ search:debouncedSearch, status: statusFilter, page, limit }).then((res) => {
       setLinks(res.data);
       useSearchIndexStore.getState().setPaymentLinks(res.data);
       setTotal(res.total);
       setTotalPages(res.totalPages);
       setLoading(false);
     });
-  }, [search, statusFilter, page]);
+  }, [debouncedSearch, statusFilter, page]);
 
   const columns: Column<PaymentLink>[] = [
     {
