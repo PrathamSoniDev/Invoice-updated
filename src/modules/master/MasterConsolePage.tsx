@@ -216,7 +216,9 @@ export function MasterConsolePage() {
       toast.success('User created successfully');
       loadAll();
 
-      // Fire the invite email after creation succeeds. 
+      // Fire the invite email after creation succeeds. This is best-effort:
+      // a failure here shouldn't undo the user that was just created, so it
+      // only shows a secondary toast rather than throwing.
       try {
         const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
         const inviteResponse = await fetch(`${apiUrl}/users/send-invite`, {
@@ -266,7 +268,14 @@ export function MasterConsolePage() {
     pendingActionRef.current = action;
     setReauthPassword('');
     setReauthError('');
-    setReauthOpen(true);
+    // Defer opening this dialog until the AlertDialog that triggered it (the
+    // delete/promote confirm dialog) has actually finished closing. Radix's
+    // AlertDialog and Dialog both toggle `pointer-events` on <body> while
+    // mounted; opening this dialog in the very same tick that the other one
+    // is closing races that cleanup and can leave the page — including this
+    // dialog — stuck unresponsive to clicks, even though typing still works
+    // and the dialog is visibly open.
+    setTimeout(() => setReauthOpen(true), 0);
   };
 
   const handleReauthConfirm = async () => {

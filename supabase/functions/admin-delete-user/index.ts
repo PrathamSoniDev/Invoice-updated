@@ -104,7 +104,7 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Failed to verify admin status' }, 500);
   }
 
-  if (!callerProfile || callerProfile.role !== 'ADMIN') {
+  if (!callerProfile || !['ADMIN', 'SUPER_ADMIN'].includes(callerProfile.role)) {
     return json({ error: 'Forbidden: admin access required' }, 403);
   }
 
