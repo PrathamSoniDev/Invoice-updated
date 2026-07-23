@@ -48,8 +48,7 @@ export function MessageTemplateDialog({
     "amount",
     "due_date",
     "company_name",
-    "payment_link",
-    "login_link"
+    "payment_link"
   ];
 
   useEffect(() => {
@@ -156,7 +155,7 @@ Thanks,
             <Label>Available Variables</Label>
             <Input className="hidden"
               disabled
-              placeholder="customer_name, invoice_number, amount, due_date, company_name, payment_link, login_link"
+              placeholder="customer_name, invoice_number, amount, due_date, company_name, payment_link"
               value={TEMPLATE_VARIABLES.join(", ")}
             />
             <div className="flex flex-wrap gap-2">

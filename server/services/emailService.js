@@ -601,8 +601,8 @@ export async function sendInviteEmail({ to, name, companyName, loginUrl }) {
 
   const templateVariables = {
     customer_name: name,
-    company_name: brandName,
-    login_link: loginUrl
+    company_name: companyName || "InvoiceGen",
+    // login_link: loginUrl
   }; 
 
   // Company-specific templates (message_templates) replace the message

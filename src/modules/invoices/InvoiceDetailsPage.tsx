@@ -9,6 +9,8 @@ import { PaymentGatewayDialog } from '@/components/payments/PaymentGatewayDialog
 import { invoiceService } from '@/services/invoiceService';
 import { customerService } from '@/services/customerService';
 import { sendInvoiceEmail } from '@/services/emailService';
+import { communicationService } from '@/services/reportsCommunicationService';
+import { sendInvoiceWhatsapp } from '@/services/whatsappService';
 import { initiatePaytmCheckout, buildPaytmOrderId } from '@/services/paytmClient';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useModuleStore } from '@/store/moduleStore';
@@ -65,6 +67,7 @@ export function InvoiceDetailsPage() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [sendingWhatsapp, setSendingWhatsapp] = useState(false);
   const [gatewayDialogOpen, setGatewayDialogOpen] = useState(false);
   const { company, bank, gateways, isInitialized: settingsInitialized, isLoading: settingsLoading, fetchSettings } = useSettingsStore();
   const { isModuleEnabled } = useModuleStore();
@@ -122,6 +125,8 @@ export function InvoiceDetailsPage() {
         },
         customerId: invoice.customerId,
       });
+      communicationService.sendInvoiceEmail(invoice.id, "EMAIL")
+
       // Email confirmed — mark as SENT in the database.
       const updated = await invoiceService.send(invoice.id);
       setInvoice(updated);
@@ -138,24 +143,55 @@ export function InvoiceDetailsPage() {
     }
   };
 
-  
-  const handleSendWhatsapp = () => {
+  const handleSendWhatsapp = async () => {
     if (!invoice) return;
-    const rawPhone = customer?.whatsapp || customer?.mobile;
-    if (!rawPhone) {
-      toast.error('This customer has no WhatsApp number on file');
-      return;
+    setSendingWhatsapp(true);
+    try {
+    const url = await sendInvoiceWhatsapp(invoice.id);
+    window.open(url, "_blank");
+    toast.success("Opening WhatsApp...");      
+
+    } catch (error) {
+      console.error('[InvoiceDetailsPage] Whatsapp send failed:', error);
+      toast.error(
+        error instanceof Error
+          ? `Whatsapp not sent: ${error.message}`
+          : 'Failed to send invoice Whatsapp',
+      );
+    } finally {
+      setSendingWhatsapp(false);
     }
-    // wa.me expects digits only (with country code) — no +, spaces, or dashes.
-    const digitsOnly = rawPhone.replace(/\D/g, '');
-    if (!digitsOnly) {
-      toast.error('This customer\'s WhatsApp number looks invalid');
-      return;
+  }
+
+  const handleCopyLink = async () => {
+    try {
+      if (!invoice) return;
+      const invoiceLink = `${window.location.origin}/invoices/${invoice.id}`;
+
+      await navigator.clipboard.writeText(invoiceLink);
+
+      toast.success("Invoice link copied");
+    } catch (err) {
+      toast.error("Failed to copy link");
     }
-    const message = `Hi ${invoice.customerName}, here's your invoice #${invoice.number} for ${formatCurrency(invoice.total)}, due ${formatDate(invoice.dueDate)}. Thank you!`;
-    const waUrl = `https://wa.me/${digitsOnly}?text=${encodeURIComponent(message)}`;
-    window.open(waUrl, '_blank');
-  };
+  
+//   const handleSendWhatsapp = () => {
+//     if (!invoice) return;
+//     const rawPhone = customer?.whatsapp || customer?.mobile;
+//     if (!rawPhone) {
+//       toast.error('This customer has no WhatsApp number on file');
+//       return;
+//     }
+//     // wa.me expects digits only (with country code) — no +, spaces, or dashes.
+//     const digitsOnly = rawPhone.replace(/\D/g, '');
+//     if (!digitsOnly) {
+//       toast.error('This customer\'s WhatsApp number looks invalid');
+//       return;
+//     }
+//     const message = `Hi ${invoice.customerName}, here's your invoice #${invoice.number} for ${formatCurrency(invoice.total)}, due ${formatDate(invoice.dueDate)}. Thank you!`;
+//     const waUrl = `https://wa.me/${digitsOnly}?text=${encodeURIComponent(message)}`;
+//     window.open(waUrl, '_blank');
+//   };
 
   const handlePayRazorpay = async () => {
     if (!invoice) return;
@@ -280,7 +316,7 @@ export function InvoiceDetailsPage() {
           </span>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.success('Invoice link copied')}>
+          <Button variant="outline" size="sm" className="gap-2" onClick={handleCopyLink}>
             <Copy className="h-4 w-4" /> Copy Link
           </Button>
           {emailEnabled && (
@@ -289,8 +325,8 @@ export function InvoiceDetailsPage() {
             </Button>
           )}
           {whatsappEnabled && (
-            <Button variant="outline" size="sm" className="gap-2" onClick={handleSendWhatsapp}>
-              <MessageCircle className="h-4 w-4" /> WhatsApp
+            <Button variant="outline" size="sm" className="gap-2" onClick={handleSendWhatsapp} disabled={sendingWhatsapp}>
+              <MessageCircle className="h-4 w-4" /> {sendingWhatsapp ? "Sending..." : "WhatsApp"}
             </Button>
           )}
           {invoice.status !== 'paid' && (

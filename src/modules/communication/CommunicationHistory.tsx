@@ -14,6 +14,7 @@ import { MessageCircle, Mail, MessageSquare, FileText, Plus } from 'lucide-react
 import { toast } from 'sonner';
 
 import { MessageTemplateDialog } from "@/components/templates/MessageTemplateDialog";
+import { useDebounce } from '@/hooks/use-debounce';
 
 interface CommunicationHistoryProps {
   channel: CommunicationChannel;
@@ -115,15 +116,16 @@ export function CommunicationHistory({ channel, title, description, icon: Icon }
     }
   };
 
+  const debouncedSearch = useDebounce(search, 500);
   useEffect(() => {
     setLoading(true);
-    communicationService.listLogs({ search, channel, status: statusFilter, page, limit }).then((res) => {
+    communicationService.listLogs({ search : debouncedSearch, channel, status: statusFilter, page, limit }).then((res) => {
       setLogs(res.data);
       setTotal(res.total);
       setTotalPages(res.totalPages);
       setLoading(false);
     });
-  }, [search, statusFilter, page, channel]);
+  }, [debouncedSearch, statusFilter, page, channel]);
 
   useEffect(() => {
     loadTemplates();
